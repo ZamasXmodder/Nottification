@@ -1,5 +1,5 @@
--- Panel GUI + ESP System para Roblox
--- Coloca este script en ServerScriptService o como LocalScript
+-- Panel GUI + ESP System Optimizado para Roblox
+-- Coloca este script como LocalScript
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,9 +7,11 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local SoundService = game:GetService("SoundService")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local camera = Workspace.CurrentCamera
 
 -- Lista de modelos para ESP
 local targetModels = {
@@ -61,7 +63,26 @@ end
 
 -- Variables para ESP
 local espObjects = {}
+local espConnections = {}
 local espEnabled = true
+local rainbowHue = 0
+
+-- Variables para optimización
+local lastESPCheck = 0
+local espCheckInterval = 1 -- Aumentado a 1 segundo para menos lag
+local foundModels = {}
+
+-- =========================
+-- FUNCIONES RAINBOW
+-- =========================
+
+local function getRainbowColor()
+    rainbowHue = rainbowHue + 0.01
+    if rainbowHue > 1 then
+        rainbowHue = 0
+    end
+    return Color3.fromHSV(rainbowHue, 1, 1)
+end
 
 -- =========================
 -- GUI PANEL DE NOTIFICACIONES
@@ -145,8 +166,8 @@ notificationContainer.Parent = screenGui
 
 local function playNotificationSound()
     local sound = Instance.new("Sound")
-    sound.SoundId = "rbxasset://sounds/electronicpingshort.wav"
-    sound.Volume = 0.5
+    sound.SoundId = "rbxassetid://76665577458181"
+    sound.Volume = 0.3
     sound.Parent = SoundService
     sound:Play()
     
@@ -170,7 +191,7 @@ local function createToastNotification(message, duration)
     notification.Size = UDim2.new(0, 280, 0, 60)
     notification.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     notification.BorderSizePixel = 0
-    notification.Position = UDim2.new(0, 300, 0, #activeNotifications * 70) -- Empezar fuera de pantalla
+    notification.Position = UDim2.new(0, 300, 0, #activeNotifications * 70)
     notification.Parent = notificationContainer
     
     local notifCorner = Instance.new("UICorner")
@@ -201,76 +222,147 @@ local function createToastNotification(message, duration)
     tweenIn:Play()
     
     -- Animación de salida después del tiempo especificado
-    wait(duration)
-    
-    local tweenOut = TweenService:Create(
-        notification,
-        TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In),
-        {Position = UDim2.new(0, 300, 0, (#activeNotifications - 1) * 70)}
-    )
-    tweenOut:Play()
-    
-    tweenOut.Completed:Connect(function()
-        -- Remover de lista activa
-        for i, notif in ipairs(activeNotifications) do
-            if notif == notification then
-                table.remove(activeNotifications, i)
-                break
+    spawn(function()
+        wait(duration)
+        
+        local tweenOut = TweenService:Create(
+            notification,
+            TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In),
+            {Position = UDim2.new(0, 300, 0, (#activeNotifications - 1) * 70)}
+        )
+        tweenOut:Play()
+        
+        tweenOut.Completed:Connect(function()
+            -- Remover de lista activa
+            for i, notif in ipairs(activeNotifications) do
+                if notif == notification then
+                    table.remove(activeNotifications, i)
+                    break
+                end
             end
-        end
-        
-        notification:Destroy()
-        
-        -- Reposicionar notificaciones restantes
-        for i, notif in ipairs(activeNotifications) do
-            local repositionTween = TweenService:Create(
-                notif,
-                TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                {Position = UDim2.new(0, 0, 0, (i - 1) * 70)}
-            )
-            repositionTween:Play()
-        end
+            
+            notification:Destroy()
+            
+            -- Reposicionar notificaciones restantes
+            for i, notif in ipairs(activeNotifications) do
+                local repositionTween = TweenService:Create(
+                    notif,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                    {Position = UDim2.new(0, 0, 0, (i - 1) * 70)}
+                )
+                repositionTween:Play()
+            end
+        end)
     end)
 end
 
 -- =========================
--- SISTEMA ESP
+-- SISTEMA ESP OPTIMIZADO
 -- =========================
+
+local function getModelCenter(model)
+    if not model or not model.Parent then return nil end
+    
+    local parts = {}
+    for _, child in pairs(model:GetDescendants()) do
+        if child:IsA("BasePart") then
+            table.insert(parts, child)
+        end
+    end
+    
+    if #parts == 0 then return nil end
+    
+    local totalCFrame = CFrame.new()
+    for _, part in pairs(parts) do
+        totalCFrame = totalCFrame + part.Position
+    end
+    
+    return totalCFrame.Position / #parts
+end
 
 local function createESP(model)
     if not model or not model.Parent then return end
-    
-    -- Verificar si ya tiene ESP
     if espObjects[model] then return end
     
-    -- Crear Highlight
+    -- Crear Highlight (solo borde, sin relleno, a través de paredes)
     local highlight = Instance.new("Highlight")
     highlight.Name = "ModelESP"
     highlight.Adornee = model
-    highlight.FillColor = Color3.fromRGB(255, 100, 100)
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.FillTransparency = 0.7
+    highlight.FillColor = Color3.fromRGB(255, 255, 255)
+    highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+    highlight.FillTransparency = 1 -- Sin relleno
     highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- A través de paredes
     highlight.Parent = model
     
-    -- Guardar referencia
-    espObjects[model] = highlight
+    -- Crear línea al jugador
+    local beam = Instance.new("Beam")
+    local attachment0 = Instance.new("Attachment")
+    local attachment1 = Instance.new("Attachment")
+    
+    -- Attachment en el jugador
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        attachment0.Parent = player.Character.HumanoidRootPart
+    end
+    
+    -- Attachment en el modelo
+    local modelCenter = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildOfClass("BasePart")
+    if modelCenter then
+        attachment1.Parent = modelCenter
+        
+        -- Configurar beam
+        beam.Attachment0 = attachment0
+        beam.Attachment1 = attachment1
+        beam.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+        beam.Transparency = NumberSequence.new(0.3)
+        beam.Width0 = 0.5
+        beam.Width1 = 0.5
+        beam.FaceCamera = true
+        beam.Parent = workspace
+    end
+    
+    -- Guardar referencias
+    espObjects[model] = {
+        highlight = highlight,
+        beam = beam,
+        attachment0 = attachment0,
+        attachment1 = attachment1
+    }
     
     -- Cleanup cuando el modelo se destruya
-    model.AncestryChanged:Connect(function()
+    local connection = model.AncestryChanged:Connect(function()
         if not model.Parent then
             if espObjects[model] then
-                espObjects[model]:Destroy()
+                local esp = espObjects[model]
+                if esp.highlight then esp.highlight:Destroy() end
+                if esp.beam then esp.beam:Destroy() end
+                if esp.attachment0 then esp.attachment0:Destroy() end
+                if esp.attachment1 then esp.attachment1:Destroy() end
                 espObjects[model] = nil
+            end
+            if espConnections[model] then
+                espConnections[model]:Disconnect()
+                espConnections[model] = nil
             end
         end
     end)
+    
+    espConnections[model] = connection
 end
 
 local function removeESP(model)
     if espObjects[model] then
-        espObjects[model]:Destroy()
+        local esp = espObjects[model]
+        if esp.highlight then esp.highlight:Destroy() end
+        if esp.beam then esp.beam:Destroy() end
+        if esp.attachment0 then esp.attachment0:Destroy() end
+        if esp.attachment1 then esp.attachment1:Destroy() end
         espObjects[model] = nil
+    end
+    
+    if espConnections[model] then
+        espConnections[model]:Disconnect()
+        espConnections[model] = nil
     end
 end
 
@@ -281,9 +373,9 @@ local function toggleESP()
         espToggle.Text = "ESP: ON"
         espToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
         
-        -- Activar ESP para todos los modelos encontrados
-        for _, model in pairs(workspace:GetDescendants()) do
-            if model:IsA("Model") and targetModelsSet[model.Name] then
+        -- Buscar y aplicar ESP a modelos existentes
+        for _, model in pairs(foundModels) do
+            if model and model.Parent then
                 createESP(model)
             end
         end
@@ -292,27 +384,65 @@ local function toggleESP()
         espToggle.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
         
         -- Remover todos los ESP
-        for model, highlight in pairs(espObjects) do
-            highlight:Destroy()
+        for model, _ in pairs(espObjects) do
+            removeESP(model)
         end
-        espObjects = {}
     end
 end
 
--- Optimización: Verificar modelos cada 0.5 segundos en lugar de constantemente
-local lastESPCheck = 0
+-- Función optimizada para buscar modelos
+local function findTargetModels()
+    foundModels = {}
+    
+    -- Búsqueda recursiva optimizada
+    local function searchInContainer(container)
+        for _, child in pairs(container:GetChildren()) do
+            if child:IsA("Model") and targetModelsSet[child.Name] then
+                table.insert(foundModels, child)
+            end
+            
+            -- Buscar recursivamente en contenedores
+            if child:IsA("Folder") or child:IsA("Model") then
+                searchInContainer(child)
+            end
+        end
+    end
+    
+    searchInContainer(workspace)
+    return foundModels
+end
+
+-- Verificación periódica optimizada
 local function checkForNewModels()
     if not espEnabled then return end
     
     local currentTime = tick()
-    if currentTime - lastESPCheck < 0.5 then return end
+    if currentTime - lastESPCheck < espCheckInterval then return end
     lastESPCheck = currentTime
     
-    for _, descendant in pairs(workspace:GetDescendants()) do
-        if descendant:IsA("Model") and targetModelsSet[descendant.Name] then
-            if not espObjects[descendant] then
-                createESP(descendant)
-            end
+    local newModels = findTargetModels()
+    
+    -- Solo crear ESP para modelos nuevos
+    for _, model in pairs(newModels) do
+        if model and model.Parent and not espObjects[model] then
+            createESP(model)
+        end
+    end
+end
+
+-- Actualizar colores rainbow
+local rainbowConnection
+local function updateRainbowColors()
+    if not espEnabled then return end
+    
+    local rainbowColor = getRainbowColor()
+    
+    for model, esp in pairs(espObjects) do
+        if esp and esp.highlight and esp.highlight.Parent then
+            esp.highlight.OutlineColor = rainbowColor
+        end
+        if esp and esp.beam and esp.beam.Parent then
+            esp.beam.Color = ColorSequence.new(rainbowColor)
         end
     end
 end
@@ -323,19 +453,16 @@ end
 
 -- Manejar entrada de jugadores
 local function onPlayerAdded(newPlayer)
-    if newPlayer == player then return end -- No notificar sobre nosotros mismos
+    if newPlayer == player then return end
     
     local message = "🎮 " .. newPlayer.Name .. " se unió al servidor"
     
-    -- Sonido de notificación
     playNotificationSound()
     
-    -- Mostrar toast
     spawn(function()
         createToastNotification(message, 4)
     end)
     
-    -- Actualizar contador
     playerCountLabel.Text = "Jugadores: " .. #Players:GetPlayers()
 end
 
@@ -349,10 +476,17 @@ local function onPlayerRemoving(leavingPlayer)
         createToastNotification(message, 3)
     end)
     
-    -- Actualizar contador
-    wait(0.1) -- Pequeño delay para que el conteo sea correcto
+    wait(0.1)
     playerCountLabel.Text = "Jugadores: " .. #Players:GetPlayers()
 end
+
+-- Manejar nuevos modelos que aparecen
+workspace.DescendantAdded:Connect(function(descendant)
+    if espEnabled and descendant:IsA("Model") and targetModelsSet[descendant.Name] then
+        wait(0.1) -- Pequeño delay para asegurar que el modelo esté completamente cargado
+        createESP(descendant)
+    end
+end)
 
 -- Toggle ESP button
 espToggle.MouseButton1Click:Connect(toggleESP)
@@ -365,31 +499,37 @@ Players.PlayerRemoving:Connect(onPlayerRemoving)
 -- INICIALIZACIÓN
 -- =========================
 
--- Verificar jugadores que ya están en el servidor
+-- Verificar jugadores existentes
 for _, existingPlayer in pairs(Players:GetPlayers()) do
     if existingPlayer ~= player then
         onPlayerAdded(existingPlayer)
     end
 end
 
--- Inicializar ESP para modelos existentes
+-- Inicializar ESP
 if espEnabled then
-    for _, model in pairs(workspace:GetDescendants()) do
-        if model:IsA("Model") and targetModelsSet[model.Name] then
-            createESP(model)
-        end
+    findTargetModels()
+    for _, model in pairs(foundModels) do
+        createESP(model)
     end
 end
 
--- Ejecutar verificación de modelos en el bucle de renderizado (optimizado)
+-- Iniciar loops optimizados
 RunService.Heartbeat:Connect(checkForNewModels)
+
+-- Rainbow effect (30 FPS para suavidad sin lag)
+rainbowConnection = RunService.Heartbeat:Connect(function()
+    if tick() % (1/30) < 0.016 then -- Aproximadamente 30 FPS
+        updateRainbowColors()
+    end
+end)
 
 -- Mensaje de inicio
 spawn(function()
     wait(1)
-    createToastNotification("✅ Sistema de notificaciones y ESP activado", 3)
+    createToastNotification("✅ ESP Rainbow System activado", 3)
 end)
 
-print("Panel GUI + ESP System cargado correctamente!")
+print("ESP Rainbow System cargado!")
 print("Modelos objetivo: " .. #targetModels)
-print("ESP Status: " .. (espEnabled and "Activado" or "Desactivado"))
+print("Modelos encontrados: " .. #foundModels)
