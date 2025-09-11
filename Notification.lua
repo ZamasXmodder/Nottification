@@ -231,12 +231,11 @@ local function createGUI()
     infoLabel.TextWrapped = true
     infoLabel.Parent = mainFrame
     
-    -- Funcionalidad del botón ESP
+    -- Funcionalidad del botón ESP (sin loop)
     espButton.MouseButton1Click:Connect(function()
-        espEnabled = not espEnabled
+        toggleESP()
         espButton.Text = espEnabled and "ESP: ON" or "ESP: OFF"
         espButton.BackgroundColor3 = espEnabled and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(60, 60, 60)
-        updateESP()
     end)
     
     -- Inicialmente oculto
