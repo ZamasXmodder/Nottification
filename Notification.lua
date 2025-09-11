@@ -127,7 +127,7 @@ local function removeHighlight(model)
     end
 end
 
--- Función para actualizar ESP
+-- Función optimizada para actualizar ESP
 local function updateESP()
     if not espEnabled then
         -- Limpiar todos los highlights
@@ -138,20 +138,27 @@ local function updateESP()
         return
     end
     
-    -- Buscar models en workspace
-    local foundModels = findModelsRecursively(workspace)
+    -- Usar la búsqueda optimizada
+    local foundModels = findModelsOptimized()
     
-    -- Crear highlights para models encontrados
+    -- Crear highlights solo para models nuevos
     for _, model in pairs(foundModels) do
-        createHighlight(model)
+        if not highlights[model] and model.Parent then
+            createHighlight(model)
+        end
     end
     
-    -- Remover highlights de models que ya no existen
+    -- Remover highlights de models que ya no existen (más eficiente)
+    local toRemove = {}
     for model, highlight in pairs(highlights) do
         if not model.Parent then
             highlight:Destroy()
-            highlights[model] = nil
+            table.insert(toRemove, model)
         end
+    end
+    
+    for _, model in pairs(toRemove) do
+        highlights[model] = nil
     end
 end
 
