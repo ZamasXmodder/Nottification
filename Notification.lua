@@ -137,8 +137,10 @@ local function playNotificationSound()
     -- Si no hay sonido disponible, crear uno nuevo
     if not sound and #soundPool < maxSounds then
         sound = Instance.new("Sound")
-        sound.SoundId = "rbxassetid://77665577458181"
-        sound.Volume = 0.5
+        -- Usar un sonido de notificación que funciona bien
+        sound.SoundId = "rbxassetid://131961136" -- Sonido de ding/campana
+        sound.Volume = 0.7
+        sound.Pitch = 1.2 -- Un poco más agudo para que sea más notorio
         sound.Parent = workspace
         table.insert(soundPool, sound)
     end
@@ -146,6 +148,29 @@ local function playNotificationSound()
     if sound then
         sound:Play()
     end
+end
+
+-- Función alternativa con sonido generado
+local function playBeepSound()
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://138081500" -- Sonido de beep corto
+    sound.Volume = 0.6
+    sound.Pitch = 1.5
+    sound.Parent = workspace
+    sound:Play()
+    
+    -- Cleanup automático
+    sound.Ended:Connect(function()
+        sound:Destroy()
+    end)
+    
+    -- Backup cleanup
+    spawn(function()
+        wait(3)
+        if sound and sound.Parent then
+            sound:Destroy()
+        end
+    end)
 end
 
 -- Función para crear label ESP con nombre
@@ -292,7 +317,13 @@ local function scanForModels()
                         table.insert(playerAttachments, playerAttachment)
                     end
                     addModelToList(targetModelName, obj)
-                    playNotificationSound()
+                    
+                    -- Intentar sonido principal, si falla usar alternativo
+                    local success = pcall(playNotificationSound)
+                    if not success then
+                        playBeepSound()
+                    end
+                    
                     processedObjects[obj] = true
                 end
             end
@@ -337,7 +368,11 @@ end
 
 -- Detectar cuando nuevos jugadores entran al servidor
 Players.PlayerAdded:Connect(function(player)
-    playNotificationSound()
+    -- Intentar sonido principal, si falla usar alternativo
+    local success = pcall(playNotificationSound)
+    if not success then
+        playBeepSound()
+    end
 end)
 
 -- Manejar respawn del jugador local
