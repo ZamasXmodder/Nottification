@@ -62,12 +62,12 @@ screenGui.Name = "ESPModelPanel"
 screenGui.Parent = PlayerGui
 screenGui.ResetOnSpawn = false
 
--- Frame principal del panel
+-- Frame principal del panel (más pequeño)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "ESPPanel"
 mainFrame.Parent = screenGui
-mainFrame.Size = UDim2.new(0, 200, 0, 300)
-mainFrame.Position = UDim2.new(1, -210, 0, 10) -- Esquina superior derecha
+mainFrame.Size = UDim2.new(0, 180, 0, 80)
+mainFrame.Position = UDim2.new(1, -190, 0, 10) -- Esquina superior derecha
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 mainFrame.BorderSizePixel = 0
 mainFrame.BackgroundTransparency = 0.1
@@ -77,43 +77,28 @@ local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 8)
 corner.Parent = mainFrame
 
--- Título del panel
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Name = "Title"
-titleLabel.Parent = mainFrame
-titleLabel.Size = UDim2.new(1, 0, 0, 30)
-titleLabel.Position = UDim2.new(0, 0, 0, 0)
-titleLabel.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-titleLabel.Text = "ESP - Modelos"
-titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-titleLabel.TextScaled = true
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.BorderSizePixel = 0
+-- Variable para estado del ESP
+local espEnabled = true
 
-local titleCorner = Instance.new("UICorner")
-titleCorner.CornerRadius = UDim.new(0, 8)
-titleCorner.Parent = titleLabel
+-- Botón toggle para ESP
+local espToggle = Instance.new("TextButton")
+espToggle.Name = "ESPToggle"
+espToggle.Parent = mainFrame
+espToggle.Size = UDim2.new(1, -20, 1, -20)
+espToggle.Position = UDim2.new(0, 10, 0, 10)
+espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0) -- Verde cuando activo
+espToggle.Text = "ESP: ON"
+espToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+espToggle.TextScaled = true
+espToggle.Font = Enum.Font.GothamBold
+espToggle.BorderSizePixel = 0
 
--- ScrollingFrame para la lista de modelos
-local scrollFrame = Instance.new("ScrollingFrame")
-scrollFrame.Name = "ModelList"
-scrollFrame.Parent = mainFrame
-scrollFrame.Size = UDim2.new(1, -10, 1, -40)
-scrollFrame.Position = UDim2.new(0, 5, 0, 35)
-scrollFrame.BackgroundTransparency = 1
-scrollFrame.ScrollBarThickness = 6
-scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
-scrollFrame.BorderSizePixel = 0
-
--- Layout para organizar los elementos
-local listLayout = Instance.new("UIListLayout")
-listLayout.Parent = scrollFrame
-listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-listLayout.Padding = UDim.new(0, 2)
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 6)
+toggleCorner.Parent = espToggle
 
 -- Optimizaciones de rendimiento
 local foundModels = {}
-local modelLabels = {}
 local processedObjects = {} -- Cache para evitar procesar el mismo objeto múltiples veces
 local lastScanTime = 0
 local SCAN_INTERVAL = 2 -- Escanear cada 2 segundos en lugar de cada frame
@@ -121,6 +106,62 @@ local SCAN_INTERVAL = 2 -- Escanear cada 2 segundos en lugar de cada frame
 -- Pool de sonidos para evitar crear/destruir constantemente
 local soundPool = {}
 local maxSounds = 3
+
+-- Sistema de Toast Notifications
+local function createToast(message)
+    local toastGui = Instance.new("ScreenGui")
+    toastGui.Name = "ToastNotification"
+    toastGui.Parent = PlayerGui
+    toastGui.ResetOnSpawn = false
+    
+    local toastFrame = Instance.new("Frame")
+    toastFrame.Name = "ToastFrame"
+    toastFrame.Parent = toastGui
+    toastFrame.Size = UDim2.new(0, 300, 0, 60)
+    toastFrame.Position = UDim2.new(0.5, -150, 1, 100) -- Empieza fuera de pantalla (abajo)
+    toastFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    toastFrame.BorderSizePixel = 0
+    toastFrame.BackgroundTransparency = 0.1
+    
+    local toastCorner = Instance.new("UICorner")
+    toastCorner.CornerRadius = UDim.new(0, 10)
+    toastCorner.Parent = toastFrame
+    
+    local toastLabel = Instance.new("TextLabel")
+    toastLabel.Parent = toastFrame
+    toastLabel.Size = UDim2.new(1, -20, 1, -10)
+    toastLabel.Position = UDim2.new(0, 10, 0, 5)
+    toastLabel.BackgroundTransparency = 1
+    toastLabel.Text = message
+    toastLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toastLabel.TextScaled = true
+    toastLabel.Font = Enum.Font.Gotham
+    toastLabel.TextXAlignment = Enum.TextXAlignment.Center
+    
+    -- Animación de entrada
+    toastFrame:TweenPosition(
+        UDim2.new(0.5, -150, 1, -80), -- Posición final (visible)
+        "Out",
+        "Quart",
+        0.5,
+        true
+    )
+    
+    -- Esperar y animar salida
+    spawn(function()
+        wait(3) -- Mostrar por 3 segundos
+        toastFrame:TweenPosition(
+            UDim2.new(0.5, -150, 1, 100), -- Volver abajo
+            "In",
+            "Quart",
+            0.5,
+            true,
+            function()
+                toastGui:Destroy() -- Limpiar después de la animación
+            end
+        )
+    end)
+end
 
 -- Función optimizada para crear sonido de notificación
 local function playNotificationSound()
@@ -236,41 +277,45 @@ end
 -- Tabla para almacenar attachments del jugador
 local playerAttachments = {}
 
--- Función para agregar modelo a la lista
-local function addModelToList(modelName, model)
-    if modelLabels[modelName] then
-        return -- Ya existe en la lista
+-- Función para toggle del ESP
+local function toggleESP()
+    espEnabled = not espEnabled
+    
+    if espEnabled then
+        espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0) -- Verde
+        espToggle.Text = "ESP: ON"
+        
+        -- Reactivar todos los ESP elements
+        for model, modelName in pairs(foundModels) do
+            if model.Parent then
+                if model:FindFirstChild("ESPLabel") then
+                    model.ESPLabel.Enabled = true
+                end
+                if model:FindFirstChild("ESPLine") then
+                    model.ESPLine.Enabled = true
+                end
+            end
+        end
+    else
+        espToggle.BackgroundColor3 = Color3.fromRGB(255, 0, 0) -- Rojo
+        espToggle.Text = "ESP: OFF"
+        
+        -- Desactivar todos los ESP elements
+        for model, modelName in pairs(foundModels) do
+            if model.Parent then
+                if model:FindFirstChild("ESPLabel") then
+                    model.ESPLabel.Enabled = false
+                end
+                if model:FindFirstChild("ESPLine") then
+                    model.ESPLine.Enabled = false
+                end
+            end
+        end
     end
-    
-    local modelLabel = Instance.new("TextLabel")
-    modelLabel.Name = modelName
-    modelLabel.Parent = scrollFrame
-    modelLabel.Size = UDim2.new(1, -5, 0, 25)
-    modelLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    modelLabel.Text = "✓ " .. modelName
-    modelLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
-    modelLabel.TextScaled = true
-    modelLabel.Font = Enum.Font.Gotham
-    modelLabel.BorderSizePixel = 0
-    
-    local labelCorner = Instance.new("UICorner")
-    labelCorner.CornerRadius = UDim.new(0, 4)
-    labelCorner.Parent = modelLabel
-    
-    modelLabels[modelName] = modelLabel
-    
-    -- Actualizar el tamaño del scroll
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
 end
 
--- Función para remover modelo de la lista
-local function removeModelFromList(modelName)
-    if modelLabels[modelName] then
-        modelLabels[modelName]:Destroy()
-        modelLabels[modelName] = nil
-        scrollFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
-    end
-end
+-- Conectar el botón toggle
+espToggle.MouseButton1Click:Connect(toggleESP)
 
 -- Función optimizada para verificar nombre de modelo
 local function isTargetModel(objName)
@@ -311,12 +356,24 @@ local function scanForModels()
                 
                 if targetModelName and not foundModels[obj] then
                     foundModels[obj] = targetModelName
-                    createESPLabel(obj, targetModelName)
-                    local beam, playerAttachment = createESPLine(obj)
-                    if playerAttachment then
-                        table.insert(playerAttachments, playerAttachment)
+                    
+                    -- Solo crear ESP si está habilitado
+                    if espEnabled then
+                        createESPLabel(obj, targetModelName)
+                        local beam, playerAttachment = createESPLine(obj)
+                        if playerAttachment then
+                            table.insert(playerAttachments, playerAttachment)
+                        end
+                    else
+                        -- Crear pero deshabilitado
+                        local label = createESPLabel(obj, targetModelName)
+                        local beam, playerAttachment = createESPLine(obj)
+                        if playerAttachment then
+                            table.insert(playerAttachments, playerAttachment)
+                        end
+                        if label then label.Enabled = false end
+                        if beam then beam.Enabled = false end
                     end
-                    addModelToList(targetModelName, obj)
                     
                     -- Intentar sonido principal, si falla usar alternativo
                     local success = pcall(playNotificationSound)
@@ -351,7 +408,6 @@ local function cleanupRemovedModels()
     for model, modelName in pairs(toRemove) do
         foundModels[model] = nil
         processedObjects[model] = nil
-        removeModelFromList(modelName)
         
         -- Limpiar ESP elements
         if model:FindFirstChild("ESPLabel") then
@@ -368,6 +424,9 @@ end
 
 -- Detectar cuando nuevos jugadores entran al servidor
 Players.PlayerAdded:Connect(function(player)
+    -- Crear toast notification
+    createToast("@" .. player.Name .. " se unió al servidor")
+    
     -- Intentar sonido principal, si falla usar alternativo
     local success = pcall(playNotificationSound)
     if not success then
