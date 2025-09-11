@@ -1,16 +1,16 @@
--- Mini Panel ESP para Modelos Específicos
+-- Mini Panel ESP Optimizado (Sin Lag)
 -- Ubicación: Esquina superior derecha
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
-local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Lista de modelos a detectar
-local targetModels = {
+-- Lista de modelos a detectar (convertida a hash table para búsqueda O(1))
+local targetModels = {}
+local modelNames = {
     "La Vacca Saturno Saturnita",
     "Bisonte Giuppitere", 
     "Blackhole Goat",
@@ -50,6 +50,11 @@ local targetModels = {
     "Garama and Madundung",
     "Dragon Cannelloni"
 }
+
+-- Convertir a hash table para búsqueda rápida
+for _, name in pairs(modelNames) do
+    targetModels[name:lower()] = name
+end
 
 -- Crear ScreenGui principal
 local screenGui = Instance.new("ScreenGui")
@@ -106,32 +111,58 @@ listLayout.Parent = scrollFrame
 listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 listLayout.Padding = UDim.new(0, 2)
 
--- Tabla para almacenar modelos encontrados
+-- Optimizaciones de rendimiento
 local foundModels = {}
 local modelLabels = {}
+local processedObjects = {} -- Cache para evitar procesar el mismo objeto múltiples veces
+local lastScanTime = 0
+local SCAN_INTERVAL = 2 -- Escanear cada 2 segundos en lugar de cada frame
 
--- Función para crear sonido de notificación
+-- Pool de sonidos para evitar crear/destruir constantemente
+local soundPool = {}
+local maxSounds = 3
+
+-- Función optimizada para crear sonido de notificación
 local function playNotificationSound()
-    local sound = Instance.new("Sound")
-    sound.SoundId = "rbxassetid://77665577458181"
-    sound.Volume = 0.5
-    sound.Parent = workspace
-    sound:Play()
+    local sound = nil
     
-    sound.Ended:Connect(function()
-        sound:Destroy()
-    end)
+    -- Buscar sonido disponible en el pool
+    for i, poolSound in pairs(soundPool) do
+        if not poolSound.IsPlaying then
+            sound = poolSound
+            break
+        end
+    end
+    
+    -- Si no hay sonido disponible, crear uno nuevo
+    if not sound and #soundPool < maxSounds then
+        sound = Instance.new("Sound")
+        sound.SoundId = "rbxassetid://77665577458181"
+        sound.Volume = 0.5
+        sound.Parent = workspace
+        table.insert(soundPool, sound)
+    end
+    
+    if sound then
+        sound:Play()
+    end
 end
 
--- Función para crear highlight (ESP)
+-- Función optimizada para crear highlight (ESP)
 local function createHighlight(model)
+    -- Verificar si ya tiene highlight
+    if model:FindFirstChild("ESPHighlight") then
+        return model:FindFirstChild("ESPHighlight")
+    end
+    
     local highlight = Instance.new("Highlight")
+    highlight.Name = "ESPHighlight"
     highlight.Parent = model
     highlight.FillColor = Color3.fromRGB(255, 0, 0)
     highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
     highlight.FillTransparency = 0.5
     highlight.OutlineTransparency = 0
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- Ver a través de paredes
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     return highlight
 end
 
@@ -171,42 +202,76 @@ local function removeModelFromList(modelName)
     end
 end
 
--- Función para buscar modelos en el workspace
+-- Función optimizada para verificar nombre de modelo
+local function isTargetModel(objName)
+    local lowerName = objName:lower()
+    for targetName, originalName in pairs(targetModels) do
+        if string.find(lowerName, targetName) then
+            return originalName
+        end
+    end
+    return nil
+end
+
+-- Función optimizada para buscar modelos (solo cuando es necesario)
 local function scanForModels()
-    local function searchInContainer(container)
+    local currentTime = tick()
+    if currentTime - lastScanTime < SCAN_INTERVAL then
+        return -- No escanear tan frecuentemente
+    end
+    lastScanTime = currentTime
+    
+    local function searchInContainer(container, depth)
+        -- Limitar profundidad para evitar lag
+        if depth > 5 then return end
+        
         for _, obj in pairs(container:GetChildren()) do
+            -- Saltar si ya fue procesado
+            if processedObjects[obj] then
+                continue
+            end
+            
             if obj:IsA("Model") or obj:IsA("Part") or obj:IsA("MeshPart") then
-                for _, targetModel in pairs(targetModels) do
-                    if string.find(obj.Name:lower(), targetModel:lower()) or 
-                       (obj:IsA("Model") and obj.PrimaryPart and string.find(obj.PrimaryPart.Name:lower(), targetModel:lower())) then
-                        
-                        if not foundModels[obj] then
-                            foundModels[obj] = targetModel
-                            createHighlight(obj)
-                            addModelToList(targetModel, obj)
-                            playNotificationSound()
-                        end
-                    end
+                local targetModelName = isTargetModel(obj.Name)
+                
+                -- También verificar PrimaryPart para modelos
+                if not targetModelName and obj:IsA("Model") and obj.PrimaryPart then
+                    targetModelName = isTargetModel(obj.PrimaryPart.Name)
+                end
+                
+                if targetModelName and not foundModels[obj] then
+                    foundModels[obj] = targetModelName
+                    createHighlight(obj)
+                    addModelToList(targetModelName, obj)
+                    playNotificationSound()
+                    processedObjects[obj] = true
                 end
             end
             
-            -- Buscar recursivamente en contenedores
-            if obj:IsA("Model") or obj:IsA("Folder") then
-                searchInContainer(obj)
+            -- Buscar recursivamente pero con límite de profundidad
+            if (obj:IsA("Model") or obj:IsA("Folder")) and depth < 3 then
+                searchInContainer(obj, depth + 1)
             end
         end
     end
     
-    searchInContainer(workspace)
+    searchInContainer(workspace, 0)
 end
 
--- Función para limpiar modelos eliminados
+-- Función optimizada para limpiar modelos eliminados
 local function cleanupRemovedModels()
+    local toRemove = {}
+    
     for model, modelName in pairs(foundModels) do
         if not model.Parent then
-            foundModels[model] = nil
-            removeModelFromList(modelName)
+            toRemove[model] = modelName
         end
+    end
+    
+    for model, modelName in pairs(toRemove) do
+        foundModels[model] = nil
+        processedObjects[model] = nil
+        removeModelFromList(modelName)
     end
 end
 
@@ -215,11 +280,29 @@ Players.PlayerAdded:Connect(function(player)
     playNotificationSound()
 end)
 
--- Bucle principal de escaneo
-RunService.Heartbeat:Connect(function()
+-- Usar eventos en lugar de bucle constante para mejor rendimiento
+workspace.ChildAdded:Connect(function(child)
+    wait(0.1) -- Pequeña espera para que el objeto se inicialice
     scanForModels()
-    cleanupRemovedModels()
 end)
+
+workspace.DescendantAdded:Connect(function(descendant)
+    if descendant:IsA("Model") or descendant:IsA("Part") or descendant:IsA("MeshPart") then
+        wait(0.1)
+        scanForModels()
+    end
+end)
+
+-- Bucle de limpieza menos frecuente
+spawn(function()
+    while true do
+        wait(5) -- Limpiar cada 5 segundos
+        cleanupRemovedModels()
+    end
+end)
+
+-- Escaneo inicial
+scanForModels()
 
 -- Hacer el panel draggable
 local dragging = false
