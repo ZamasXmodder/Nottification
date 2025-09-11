@@ -1,23 +1,17 @@
--- LocalScript completo - Colocar en StarterPlayerScripts
--- Sistema de notificaciones + ESP con panel
+-- Panel GUI + ESP System para Roblox
+-- Coloca este script en ServerScriptService o como LocalScript
 
 local Players = game:GetService("Players")
-local StarterGui = game:GetService("StarterGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local SoundService = game:GetService("SoundService")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- Variables
-local espEnabled = false
-local highlights = {}
-local gui = nil
-local isGuiOpen = false
-
--- Lista de models para ESP
+-- Lista de modelos para ESP
 local targetModels = {
     "La Vacca Saturno Saturnita",
     "Bisonte Giuppitere",
@@ -59,12 +53,101 @@ local targetModels = {
     "Dragon Cannelloni"
 }
 
--- Función para reproducir sonido de notificación
+-- Crear set para búsqueda rápida
+local targetModelsSet = {}
+for _, name in ipairs(targetModels) do
+    targetModelsSet[name] = true
+end
+
+-- Variables para ESP
+local espObjects = {}
+local espEnabled = true
+
+-- =========================
+-- GUI PANEL DE NOTIFICACIONES
+-- =========================
+
+-- Crear ScreenGui principal
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "NotificationPanel"
+screenGui.Parent = playerGui
+screenGui.ResetOnSpawn = false
+
+-- Panel principal (esquina superior derecha)
+local mainPanel = Instance.new("Frame")
+mainPanel.Name = "MainPanel"
+mainPanel.Size = UDim2.new(0, 250, 0, 100)
+mainPanel.Position = UDim2.new(1, -260, 0, 10)
+mainPanel.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+mainPanel.BorderSizePixel = 0
+mainPanel.Parent = screenGui
+
+-- Esquinas redondeadas
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = mainPanel
+
+-- Título del panel
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "Title"
+titleLabel.Size = UDim2.new(1, 0, 0, 25)
+titleLabel.Position = UDim2.new(0, 0, 0, 0)
+titleLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+titleLabel.Text = "🔔 Notificaciones"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.TextScaled = true
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.Parent = mainPanel
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = titleLabel
+
+-- Contador de jugadores
+local playerCountLabel = Instance.new("TextLabel")
+playerCountLabel.Name = "PlayerCount"
+playerCountLabel.Size = UDim2.new(1, -10, 0, 25)
+playerCountLabel.Position = UDim2.new(0, 5, 0, 30)
+playerCountLabel.BackgroundTransparency = 1
+playerCountLabel.Text = "Jugadores: " .. #Players:GetPlayers()
+playerCountLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+playerCountLabel.TextScaled = true
+playerCountLabel.Font = Enum.Font.Gotham
+playerCountLabel.Parent = mainPanel
+
+-- Toggle ESP Button
+local espToggle = Instance.new("TextButton")
+espToggle.Name = "ESPToggle"
+espToggle.Size = UDim2.new(0.9, 0, 0, 30)
+espToggle.Position = UDim2.new(0.05, 0, 0, 60)
+espToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+espToggle.Text = "ESP: ON"
+espToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+espToggle.TextScaled = true
+espToggle.Font = Enum.Font.GothamBold
+espToggle.Parent = mainPanel
+
+local espCorner = Instance.new("UICorner")
+espCorner.CornerRadius = UDim.new(0, 4)
+espCorner.Parent = espToggle
+
+-- Container para notificaciones
+local notificationContainer = Instance.new("Frame")
+notificationContainer.Name = "NotificationContainer"
+notificationContainer.Size = UDim2.new(0, 280, 1, 0)
+notificationContainer.Position = UDim2.new(1, -290, 0, 120)
+notificationContainer.BackgroundTransparency = 1
+notificationContainer.Parent = screenGui
+
+-- =========================
+-- SISTEMA DE SONIDOS
+-- =========================
+
 local function playNotificationSound()
     local sound = Instance.new("Sound")
     sound.SoundId = "rbxasset://sounds/electronicpingshort.wav"
     sound.Volume = 0.5
-    sound.Parent = workspace
+    sound.Parent = SoundService
     sound:Play()
     
     sound.Ended:Connect(function()
@@ -72,220 +155,241 @@ local function playNotificationSound()
     end)
 end
 
--- Función para mostrar toast notification
-local function showToast(playerName)
-    StarterGui:SetCore("SendNotification", {
-        Title = "¡Jugador Conectado!";
-        Text = playerName .. " ha entrado al servidor";
-        Duration = 5;
-        Icon = "rbxasset://textures/ui/GuiImagePlaceholder.png";
-    })
-end
+-- =========================
+-- SISTEMA DE NOTIFICACIONES TOAST
+-- =========================
 
--- Función para buscar models recursivamente
-local function findModelsRecursively(parent)
-    local foundModels = {}
+local activeNotifications = {}
+
+local function createToastNotification(message, duration)
+    duration = duration or 3
     
-    local function searchChildren(obj)
-        for _, child in pairs(obj:GetChildren()) do
-            if child:IsA("Model") then
-                for _, targetName in pairs(targetModels) do
-                    if child.Name == targetName then
-                        table.insert(foundModels, child)
-                        break
-                    end
-                end
+    -- Crear notificación
+    local notification = Instance.new("Frame")
+    notification.Name = "ToastNotification"
+    notification.Size = UDim2.new(0, 280, 0, 60)
+    notification.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    notification.BorderSizePixel = 0
+    notification.Position = UDim2.new(0, 300, 0, #activeNotifications * 70) -- Empezar fuera de pantalla
+    notification.Parent = notificationContainer
+    
+    local notifCorner = Instance.new("UICorner")
+    notifCorner.CornerRadius = UDim.new(0, 6)
+    notifCorner.Parent = notification
+    
+    -- Texto de la notificación
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, -10, 1, -10)
+    textLabel.Position = UDim2.new(0, 5, 0, 5)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = message
+    textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textLabel.TextScaled = true
+    textLabel.Font = Enum.Font.Gotham
+    textLabel.TextWrapped = true
+    textLabel.Parent = notification
+    
+    -- Añadir a lista activa
+    table.insert(activeNotifications, notification)
+    
+    -- Animación de entrada
+    local tweenIn = TweenService:Create(
+        notification, 
+        TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        {Position = UDim2.new(0, 0, 0, (#activeNotifications - 1) * 70)}
+    )
+    tweenIn:Play()
+    
+    -- Animación de salida después del tiempo especificado
+    wait(duration)
+    
+    local tweenOut = TweenService:Create(
+        notification,
+        TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In),
+        {Position = UDim2.new(0, 300, 0, (#activeNotifications - 1) * 70)}
+    )
+    tweenOut:Play()
+    
+    tweenOut.Completed:Connect(function()
+        -- Remover de lista activa
+        for i, notif in ipairs(activeNotifications) do
+            if notif == notification then
+                table.remove(activeNotifications, i)
+                break
             end
-            -- Buscar recursivamente en los hijos
-            searchChildren(child)
         end
-    end
-    
-    searchChildren(parent)
-    return foundModels
+        
+        notification:Destroy()
+        
+        -- Reposicionar notificaciones restantes
+        for i, notif in ipairs(activeNotifications) do
+            local repositionTween = TweenService:Create(
+                notif,
+                TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                {Position = UDim2.new(0, 0, 0, (i - 1) * 70)}
+            )
+            repositionTween:Play()
+        end
+    end)
 end
 
--- Función para crear highlight
-local function createHighlight(model)
-    if highlights[model] then return end
+-- =========================
+-- SISTEMA ESP
+-- =========================
+
+local function createESP(model)
+    if not model or not model.Parent then return end
     
+    -- Verificar si ya tiene ESP
+    if espObjects[model] then return end
+    
+    -- Crear Highlight
     local highlight = Instance.new("Highlight")
-    highlight.FillColor = Color3.fromRGB(255, 0, 0)
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 0)
-    highlight.FillTransparency = 0.5
+    highlight.Name = "ModelESP"
+    highlight.Adornee = model
+    highlight.FillColor = Color3.fromRGB(255, 100, 100)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.FillTransparency = 0.7
     highlight.OutlineTransparency = 0
     highlight.Parent = model
     
-    highlights[model] = highlight
-end
-
--- Función para remover highlight
-local function removeHighlight(model)
-    if highlights[model] then
-        highlights[model]:Destroy()
-        highlights[model] = nil
-    end
-end
-
--- Función optimizada para actualizar ESP
-local function updateESP()
-    if not espEnabled then
-        -- Limpiar todos los highlights
-        for model, highlight in pairs(highlights) do
-            highlight:Destroy()
-        end
-        highlights = {}
-        return
-    end
+    -- Guardar referencia
+    espObjects[model] = highlight
     
-    -- Usar la búsqueda optimizada
-    local foundModels = findModelsOptimized()
-    
-    -- Crear highlights solo para models nuevos
-    for _, model in pairs(foundModels) do
-        if not highlights[model] and model.Parent then
-            createHighlight(model)
-        end
-    end
-    
-    -- Remover highlights de models que ya no existen (más eficiente)
-    local toRemove = {}
-    for model, highlight in pairs(highlights) do
+    -- Cleanup cuando el modelo se destruya
+    model.AncestryChanged:Connect(function()
         if not model.Parent then
-            highlight:Destroy()
-            table.insert(toRemove, model)
+            if espObjects[model] then
+                espObjects[model]:Destroy()
+                espObjects[model] = nil
+            end
         end
-    end
-    
-    for _, model in pairs(toRemove) do
-        highlights[model] = nil
+    end)
+end
+
+local function removeESP(model)
+    if espObjects[model] then
+        espObjects[model]:Destroy()
+        espObjects[model] = nil
     end
 end
 
--- Función para crear el GUI
-local function createGUI()
-    gui = Instance.new("ScreenGui")
-    gui.Name = "ESPPanel"
-    gui.Parent = playerGui
-    gui.ResetOnSpawn = false
+local function toggleESP()
+    espEnabled = not espEnabled
     
-    -- Frame principal
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0, 250, 0, 150)
-    mainFrame.Position = UDim2.new(1, -270, 0, 20) -- Esquina superior derecha
-    mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Parent = gui
-    mainFrame.ClipsDescendants = true
+    if espEnabled then
+        espToggle.Text = "ESP: ON"
+        espToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        
+        -- Activar ESP para todos los modelos encontrados
+        for _, model in pairs(workspace:GetDescendants()) do
+            if model:IsA("Model") and targetModelsSet[model.Name] then
+                createESP(model)
+            end
+        end
+    else
+        espToggle.Text = "ESP: OFF"
+        espToggle.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+        
+        -- Remover todos los ESP
+        for model, highlight in pairs(espObjects) do
+            highlight:Destroy()
+        end
+        espObjects = {}
+    end
+end
+
+-- Optimización: Verificar modelos cada 0.5 segundos en lugar de constantemente
+local lastESPCheck = 0
+local function checkForNewModels()
+    if not espEnabled then return end
     
-    -- Esquinas redondeadas
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = mainFrame
+    local currentTime = tick()
+    if currentTime - lastESPCheck < 0.5 then return end
+    lastESPCheck = currentTime
     
-    -- Título
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, 0, 0, 30)
-    title.Position = UDim2.new(0, 0, 0, 0)
-    title.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-    title.BorderSizePixel = 0
-    title.Text = "Panel ESP"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextScaled = true
-    title.Font = Enum.Font.SourceSansBold
-    title.Parent = mainFrame
+    for _, descendant in pairs(workspace:GetDescendants()) do
+        if descendant:IsA("Model") and targetModelsSet[descendant.Name] then
+            if not espObjects[descendant] then
+                createESP(descendant)
+            end
+        end
+    end
+end
+
+-- =========================
+-- EVENT HANDLERS
+-- =========================
+
+-- Manejar entrada de jugadores
+local function onPlayerAdded(newPlayer)
+    if newPlayer == player then return end -- No notificar sobre nosotros mismos
     
-    local titleCorner = Instance.new("UICorner")
-    titleCorner.CornerRadius = UDim.new(0, 8)
-    titleCorner.Parent = title
+    local message = "🎮 " .. newPlayer.Name .. " se unió al servidor"
     
-    -- Botón ESP Toggle
-    local espButton = Instance.new("TextButton")
-    espButton.Name = "ESPButton"
-    espButton.Size = UDim2.new(0.9, 0, 0, 35)
-    espButton.Position = UDim2.new(0.05, 0, 0, 40)
-    espButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    espButton.BorderSizePixel = 0
-    espButton.Text = "ESP: OFF"
-    espButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    espButton.TextScaled = true
-    espButton.Font = Enum.Font.SourceSans
-    espButton.Parent = mainFrame
+    -- Sonido de notificación
+    playNotificationSound()
     
-    local buttonCorner = Instance.new("UICorner")
-    buttonCorner.CornerRadius = UDim.new(0, 4)
-    buttonCorner.Parent = espButton
-    
-    -- Info label
-    local infoLabel = Instance.new("TextLabel")
-    infoLabel.Name = "InfoLabel"
-    infoLabel.Size = UDim2.new(0.9, 0, 0, 60)
-    infoLabel.Position = UDim2.new(0.05, 0, 0, 85)
-    infoLabel.BackgroundTransparency = 1
-    infoLabel.Text = "Presiona F para abrir/cerrar\nESP para models específicos"
-    infoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    infoLabel.TextScaled = true
-    infoLabel.Font = Enum.Font.SourceSans
-    infoLabel.TextWrapped = true
-    infoLabel.Parent = mainFrame
-    
-    -- Funcionalidad del botón ESP (sin loop)
-    espButton.MouseButton1Click:Connect(function()
-        toggleESP()
-        espButton.Text = espEnabled and "ESP: ON" or "ESP: OFF"
-        espButton.BackgroundColor3 = espEnabled and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(60, 60, 60)
+    -- Mostrar toast
+    spawn(function()
+        createToastNotification(message, 4)
     end)
     
-    -- Inicialmente oculto
-    mainFrame.Size = UDim2.new(0, 250, 0, 0)
+    -- Actualizar contador
+    playerCountLabel.Text = "Jugadores: " .. #Players:GetPlayers()
 end
 
--- Función para animar el panel
-local function togglePanel()
-    if not gui then return end
+-- Manejar salida de jugadores
+local function onPlayerRemoving(leavingPlayer)
+    if leavingPlayer == player then return end
     
-    local mainFrame = gui.MainFrame
-    local targetSize = isGuiOpen and UDim2.new(0, 250, 0, 0) or UDim2.new(0, 250, 0, 150)
+    local message = "👋 " .. leavingPlayer.Name .. " salió del servidor"
     
-    local tween = TweenService:Create(
-        mainFrame,
-        TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-        {Size = targetSize}
-    )
+    spawn(function()
+        createToastNotification(message, 3)
+    end)
     
-    tween:Play()
-    isGuiOpen = not isGuiOpen
+    -- Actualizar contador
+    wait(0.1) -- Pequeño delay para que el conteo sea correcto
+    playerCountLabel.Text = "Jugadores: " .. #Players:GetPlayers()
 end
 
--- Sistema de notificaciones para nuevos jugadores
-Players.PlayerAdded:Connect(function(newPlayer)
-    if newPlayer ~= player then
-        wait(1)
-        playNotificationSound()
-        showToast(newPlayer.Name)
-        print(newPlayer.Name .. " ha entrado al servidor!")
+-- Toggle ESP button
+espToggle.MouseButton1Click:Connect(toggleESP)
+
+-- Conectar eventos
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+-- =========================
+-- INICIALIZACIÓN
+-- =========================
+
+-- Verificar jugadores que ya están en el servidor
+for _, existingPlayer in pairs(Players:GetPlayers()) do
+    if existingPlayer ~= player then
+        onPlayerAdded(existingPlayer)
     end
+end
+
+-- Inicializar ESP para modelos existentes
+if espEnabled then
+    for _, model in pairs(workspace:GetDescendants()) do
+        if model:IsA("Model") and targetModelsSet[model.Name] then
+            createESP(model)
+        end
+    end
+end
+
+-- Ejecutar verificación de modelos en el bucle de renderizado (optimizado)
+RunService.Heartbeat:Connect(checkForNewModels)
+
+-- Mensaje de inicio
+spawn(function()
+    wait(1)
+    createToastNotification("✅ Sistema de notificaciones y ESP activado", 3)
 end)
 
--- Manejar input del usuario
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    
-    if input.KeyCode == Enum.KeyCode.F then
-        togglePanel()
-    end
-end)
-
--- Loop para actualizar ESP continuamente
-RunService.Heartbeat:Connect(function()
-    if espEnabled then
-        updateESP()
-    end
-end)
-
--- Inicializar GUI
-createGUI()
-
-print("Script cargado: Presiona F para abrir el panel ESP")
+print("Panel GUI + ESP System cargado correctamente!")
+print("Modelos objetivo: " .. #targetModels)
+print("ESP Status: " .. (espEnabled and "Activado" or "Desactivado"))
