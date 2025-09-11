@@ -148,23 +148,68 @@ local function playNotificationSound()
     end
 end
 
--- Función optimizada para crear highlight (ESP)
-local function createHighlight(model)
-    -- Verificar si ya tiene highlight
-    if model:FindFirstChild("ESPHighlight") then
-        return model:FindFirstChild("ESPHighlight")
+-- Función para crear label ESP con nombre
+local function createESPLabel(model, modelName)
+    -- Verificar si ya tiene label ESP
+    if model:FindFirstChild("ESPLabel") then
+        return model:FindFirstChild("ESPLabel")
     end
     
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "ESPHighlight"
-    highlight.Parent = model
-    highlight.FillColor = Color3.fromRGB(255, 0, 0)
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.FillTransparency = 0.5
-    highlight.OutlineTransparency = 0
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    return highlight
+    -- Crear BillboardGui para el label
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Name = "ESPLabel"
+    billboardGui.Parent = model
+    billboardGui.Size = UDim2.new(0, 200, 0, 50)
+    billboardGui.StudsOffset = Vector3.new(0, 3, 0)
+    billboardGui.AlwaysOnTop = true -- Ver a través de paredes
+    billboardGui.LightInfluence = 0
+    
+    -- Crear el label con el nombre
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Parent = billboardGui
+    nameLabel.Size = UDim2.new(1, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = modelName
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 0) -- Amarillo brillante
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0) -- Contorno negro
+    nameLabel.TextScaled = true
+    nameLabel.Font = Enum.Font.GothamBold
+    
+    return billboardGui
 end
+
+-- Función para crear línea ESP desde el jugador
+local function createESPLine(model)
+    -- Verificar si ya tiene línea ESP
+    if model:FindFirstChild("ESPLine") then
+        return model:FindFirstChild("ESPLine")
+    end
+    
+    -- Crear la línea usando Beam
+    local attachment0 = Instance.new("Attachment")
+    attachment0.Name = "PlayerAttachment"
+    
+    local attachment1 = Instance.new("Attachment")
+    attachment1.Name = "ModelAttachment"
+    attachment1.Parent = model
+    
+    local beam = Instance.new("Beam")
+    beam.Name = "ESPLine"
+    beam.Parent = model
+    beam.Attachment0 = attachment0
+    beam.Attachment1 = attachment1
+    beam.Color = ColorSequence.new(Color3.fromRGB(255, 0, 0)) -- Línea roja
+    beam.Width0 = 0.2
+    beam.Width1 = 0.2
+    beam.Transparency = NumberSequence.new(0.3)
+    beam.FaceCamera = true
+    
+    return beam, attachment0
+end
+
+-- Tabla para almacenar attachments del jugador
+local playerAttachments = {}
 
 -- Función para agregar modelo a la lista
 local function addModelToList(modelName, model)
@@ -241,7 +286,11 @@ local function scanForModels()
                 
                 if targetModelName and not foundModels[obj] then
                     foundModels[obj] = targetModelName
-                    createHighlight(obj)
+                    createESPLabel(obj, targetModelName)
+                    local beam, playerAttachment = createESPLine(obj)
+                    if playerAttachment then
+                        table.insert(playerAttachments, playerAttachment)
+                    end
                     addModelToList(targetModelName, obj)
                     playNotificationSound()
                     processedObjects[obj] = true
@@ -272,12 +321,29 @@ local function cleanupRemovedModels()
         foundModels[model] = nil
         processedObjects[model] = nil
         removeModelFromList(modelName)
+        
+        -- Limpiar ESP elements
+        if model:FindFirstChild("ESPLabel") then
+            model.ESPLabel:Destroy()
+        end
+        if model:FindFirstChild("ESPLine") then
+            model.ESPLine:Destroy()
+        end
+        if model:FindFirstChild("ModelAttachment") then
+            model.ModelAttachment:Destroy()
+        end
     end
 end
 
 -- Detectar cuando nuevos jugadores entran al servidor
 Players.PlayerAdded:Connect(function(player)
     playNotificationSound()
+end)
+
+-- Manejar respawn del jugador local
+LocalPlayer.CharacterAdded:Connect(function(character)
+    wait(1) -- Esperar a que el personaje se cargue completamente
+    updateESPLines()
 end)
 
 -- Usar eventos en lugar de bucle constante para mejor rendimiento
@@ -298,6 +364,40 @@ spawn(function()
     while true do
         wait(5) -- Limpiar cada 5 segundos
         cleanupRemovedModels()
+    end
+end)
+
+-- Función para actualizar posiciones de las líneas ESP
+local function updateESPLines()
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        return
+    end
+    
+    local rootPart = character.HumanoidRootPart
+    
+    -- Actualizar todos los attachments del jugador
+    for _, attachment in pairs(playerAttachments) do
+        if attachment and attachment.Parent then
+            attachment.Parent = rootPart
+        end
+    end
+    
+    -- Limpiar attachments inválidos
+    local validAttachments = {}
+    for _, attachment in pairs(playerAttachments) do
+        if attachment and attachment.Parent then
+            table.insert(validAttachments, attachment)
+        end
+    end
+    playerAttachments = validAttachments
+end
+
+-- Actualizar líneas ESP cada segundo
+spawn(function()
+    while true do
+        wait(1)
+        updateESPLines()
     end
 end)
 
