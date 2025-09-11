@@ -103,9 +103,9 @@ local processedObjects = {} -- Cache para evitar procesar el mismo objeto múlti
 local lastScanTime = 0
 local SCAN_INTERVAL = 2 -- Escanear cada 2 segundos en lugar de cada frame
 
--- Pool de sonidos para evitar crear/destruir constantemente
-local soundPool = {}
-local maxSounds = 3
+-- Variables para control de sonido
+local lastSoundTime = 0
+local SOUND_COOLDOWN = 0.5 -- Cooldown entre sonidos para evitar spam
 
 -- Sistema de Toast Notifications
 local function createToast(message)
@@ -163,55 +163,88 @@ local function createToast(message)
     end)
 end
 
--- Función optimizada para crear sonido de notificación
+-- Función para crear sonido sintético de notificación
 local function playNotificationSound()
-    local sound = nil
-    
-    -- Buscar sonido disponible en el pool
-    for i, poolSound in pairs(soundPool) do
-        if not poolSound.IsPlaying then
-            sound = poolSound
-            break
-        end
+    local currentTime = tick()
+    if currentTime - lastSoundTime < SOUND_COOLDOWN then
+        return -- Evitar spam de sonidos
     end
+    lastSoundTime = currentTime
     
-    -- Si no hay sonido disponible, crear uno nuevo
-    if not sound and #soundPool < maxSounds then
-        sound = Instance.new("Sound")
-        -- Usar un sonido de notificación que funciona bien
-        sound.SoundId = "rbxassetid://131961136" -- Sonido de ding/campana
-        sound.Volume = 0.7
-        sound.Pitch = 1.2 -- Un poco más agudo para que sea más notorio
-        sound.Parent = workspace
-        table.insert(soundPool, sound)
-    end
+    -- Crear múltiples tonos para simular una melodía de notificación
+    local tones = {
+        {pitch = 2.0, duration = 0.1},
+        {pitch = 2.5, duration = 0.1},
+        {pitch = 3.0, duration = 0.2}
+    }
     
-    if sound then
-        sound:Play()
+    for i, tone in pairs(tones) do
+        spawn(function()
+            wait((i-1) * 0.1) -- Delay entre tonos
+            local sound = Instance.new("Sound")
+            sound.SoundId = "rbxasset://sounds/electronicpingshort.wav" -- Sonido interno de Roblox
+            sound.Volume = 0.5
+            sound.Pitch = tone.pitch
+            sound.Parent = workspace
+            sound:Play()
+            
+            -- Cleanup
+            spawn(function()
+                wait(tone.duration + 0.5)
+                if sound and sound.Parent then
+                    sound:Destroy()
+                end
+            end)
+        end)
     end
 end
 
--- Función alternativa con sonido generado
+-- Función para sonido de beep alternativo
 local function playBeepSound()
     local sound = Instance.new("Sound")
-    sound.SoundId = "rbxassetid://138081500" -- Sonido de beep corto
-    sound.Volume = 0.6
-    sound.Pitch = 1.5
+    sound.SoundId = "rbxasset://sounds/button_rollover.wav" -- Sonido interno de Roblox
+    sound.Volume = 0.7
+    sound.Pitch = 1.8
     sound.Parent = workspace
     sound:Play()
     
     -- Cleanup automático
-    sound.Ended:Connect(function()
-        sound:Destroy()
-    end)
-    
-    -- Backup cleanup
     spawn(function()
-        wait(3)
+        wait(1)
         if sound and sound.Parent then
             sound:Destroy()
         end
     end)
+end
+
+-- Función para sonido de jugador uniéndose (más distintivo)
+local function playPlayerJoinSound()
+    -- Crear secuencia de sonidos para jugador que se une
+    local sequence = {
+        {sound = "rbxasset://sounds/electronicpingshort.wav", pitch = 1.5, delay = 0},
+        {sound = "rbxasset://sounds/electronicpingshort.wav", pitch = 2.0, delay = 0.1},
+        {sound = "rbxasset://sounds/button_rollover.wav", pitch = 1.2, delay = 0.3}
+    }
+    
+    for _, note in pairs(sequence) do
+        spawn(function()
+            wait(note.delay)
+            local sound = Instance.new("Sound")
+            sound.SoundId = note.sound
+            sound.Volume = 0.6
+            sound.Pitch = note.pitch
+            sound.Parent = workspace
+            sound:Play()
+            
+            -- Cleanup
+            spawn(function()
+                wait(1)
+                if sound and sound.Parent then
+                    sound:Destroy()
+                end
+            end)
+        end)
+    end
 end
 
 -- Función para crear label ESP con nombre
@@ -375,11 +408,8 @@ local function scanForModels()
                         if beam then beam.Enabled = false end
                     end
                     
-                    -- Intentar sonido principal, si falla usar alternativo
-                    local success = pcall(playNotificationSound)
-                    if not success then
-                        playBeepSound()
-                    end
+                    -- Reproducir sonido de modelo encontrado
+                    playNotificationSound()
                     
                     processedObjects[obj] = true
                 end
@@ -427,11 +457,8 @@ Players.PlayerAdded:Connect(function(player)
     -- Crear toast notification
     createToast("@" .. player.Name .. " se unió al servidor")
     
-    -- Intentar sonido principal, si falla usar alternativo
-    local success = pcall(playNotificationSound)
-    if not success then
-        playBeepSound()
-    end
+    -- Reproducir sonido especial para jugadores que se unen
+    playPlayerJoinSound()
 end)
 
 -- Manejar respawn del jugador local
