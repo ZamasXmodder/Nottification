@@ -457,17 +457,15 @@ local function onPlayerAdded(newPlayer)
     
     local message = "🎮 " .. newPlayer.Name .. " se unió al servidor"
     
-    -- Reproducir sonido con pequeño delay para asegurar carga
-    spawn(function()
-        wait(0.1)
-        playNotificationSound()
-    end)
+    -- Reproducir sonido inmediatamente
+    playNotificationSound()
     
     spawn(function()
         createToastNotification(message, 4)
     end)
     
     playerCountLabel.Text = "Jugadores: " .. #Players:GetPlayers()
+    print("Jugador entró: " .. newPlayer.Name .. " - Sonido reproducido")
 end
 
 -- Manejar salida de jugadores
