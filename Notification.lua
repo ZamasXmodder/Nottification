@@ -457,7 +457,11 @@ local function onPlayerAdded(newPlayer)
     
     local message = "🎮 " .. newPlayer.Name .. " se unió al servidor"
     
-    playNotificationSound()
+    -- Reproducir sonido con pequeño delay para asegurar carga
+    spawn(function()
+        wait(0.1)
+        playNotificationSound()
+    end)
     
     spawn(function()
         createToastNotification(message, 4)
@@ -486,6 +490,30 @@ workspace.DescendantAdded:Connect(function(descendant)
         wait(0.1) -- Pequeño delay para asegurar que el modelo esté completamente cargado
         createESP(descendant)
     end
+end)
+
+-- Manejar respawn del jugador para reconectar líneas ESP
+player.CharacterAdded:Connect(function(character)
+    -- Esperar a que el personaje se cargue completamente
+    character:WaitForChild("HumanoidRootPart")
+    wait(1) -- Dar tiempo extra para cargar
+    
+    -- Reconectar todas las líneas ESP existentes
+    for model, esp in pairs(espObjects) do
+        if esp and esp.attachment0 and character:FindFirstChild("HumanoidRootPart") then
+            esp.attachment0.Parent = character.HumanoidRootPart
+            esp.attachment0.Position = Vector3.new(0, 0, 0)
+            
+            if esp.beam then
+                esp.beam.Attachment0 = esp.attachment0
+            end
+        end
+    end
+    
+    -- Mensaje de reconexión
+    spawn(function()
+        createToastNotification("🔄 ESP líneas reconectadas", 2)
+    end)
 end)
 
 -- Toggle ESP button
