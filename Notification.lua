@@ -1,5 +1,5 @@
--- Mini Panel ESP Optimizado (Sin Lag)
--- Ubicación: Esquina superior derecha
+-- Enhanced ESP Panel with Improved Detection and Features
+-- Features: 36 studs max distance, color coding, anchored sizes, better detection
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -8,85 +8,77 @@ local SoundService = game:GetService("SoundService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Lista de modelos a detectar (convertida a hash table para búsqueda O(1))
+-- Enhanced model detection with color coding
 local targetModels = {}
-local modelNames = {
-    "La Vacca Saturno Saturnita",
-    "Bisonte Giuppitere", 
-    "Blackhole Goat",
-    "Agarrini Ia Palini",
-    "Karkerkar Kurkur",
-    "Los Matteos",
-    "Sammyni Spyderini",
-    "Trenostruzzo Turbo 4000",
-    "Chimpanzini Spiderini",
-    "Fragola La La La",
-    "Dul Dul Dul",
-    "Torrtuginni Dragonfrutini",
-    "Los Tralaleritos",
-    "Guerriro Digitale",
-    "Las Tralaleritas",
-    "Las Vaquitas Saturnitas",
-    "Job Job Job Sahur",
-    "Graipuss Medussi",
-    "Los Spyderinis",
-    "Nooo My Hotspot",
-    "Pot Hotspot",
-    "La Sahur Combinasion",
-    "Chicleteira Bicicleteira",
-    "Spaghetti Tualetti",
-    "Esok Sekolah",
-    "Los Nooo My Hotspotsitos",
-    "La Grande Combinassion",
-    "Los Combinasionas",
-    "Nuclearo Dinosauro",
-    "La Karkerkar Combinasion",
-    "Los Hotspositos",
-    "Tralalalaledon",
-    "Ketupat Kepat",
-    "Los Bros",
-    "La Supreme Combinasion",
-    "Ketchuru and Masturu",
-    "Garama and Madundung",
-    "Dragon Cannelloni"
+local modelConfig = {
+    ["la extinct grande"] = {name = "La Extinct Grande", color = Color3.fromRGB(255, 0, 0)}, -- Red
+    ["graipuss medussi"] = {name = "Graipuss Medussi", color = Color3.fromRGB(0, 255, 0)}, -- Green
+    ["nooo my hotspot"] = {name = "Nooo My Hotspot", color = Color3.fromRGB(0, 0, 255)}, -- Blue
+    ["pot hotspot"] = {name = "Pot Hotspot", color = Color3.fromRGB(255, 255, 0)}, -- Yellow
+    ["la sahur combinasion"] = {name = "La Sahur Combinasion", color = Color3.fromRGB(255, 0, 255)}, -- Magenta
+    ["chicleteira bicicleteira"] = {name = "Chicleteira Bicicleteira", color = Color3.fromRGB(0, 255, 255)}, -- Cyan
+    ["spaghetti tualetti"] = {name = "Spaghetti Tualetti", color = Color3.fromRGB(255, 165, 0)}, -- Orange
+    ["esok sekolah"] = {name = "Esok Sekolah", color = Color3.fromRGB(128, 0, 128)}, -- Purple
+    ["los nooo my hotspotsitos"] = {name = "Los Nooo My Hotspotsitos", color = Color3.fromRGB(255, 192, 203)}, -- Pink
+    ["la grande combinassion"] = {name = "La Grande Combinassion", color = Color3.fromRGB(173, 216, 230)}, -- Light Blue
+    ["los combinasionas"] = {name = "Los Combinasionas", color = Color3.fromRGB(144, 238, 144)}, -- Light Green
+    ["nuclearo dinosauro"] = {name = "Nuclearo Dinosauro", color = Color3.fromRGB(255, 69, 0)}, -- Red Orange
+    ["los hotspositos"] = {name = "Los Hotspositos", color = Color3.fromRGB(75, 0, 130)}, -- Indigo
+    ["tralalalaledon"] = {name = "Tralalalaledon", color = Color3.fromRGB(255, 215, 0)}, -- Gold
+    ["ketupat kepat"] = {name = "Ketupat Kepat", color = Color3.fromRGB(127, 255, 212)}, -- Aquamarine
+    ["los bros"] = {name = "Los Bros", color = Color3.fromRGB(220, 20, 60)}, -- Crimson
+    ["la supreme combinasion"] = {name = "La Supreme Combinasion", color = Color3.fromRGB(255, 140, 0)}, -- Dark Orange
+    ["ketchuru and masturu"] = {name = "Ketchuru and Masturu", color = Color3.fromRGB(102, 205, 170)}, -- Medium Aquamarine
+    ["garama and madundung"] = {name = "Garama and Madundung", color = Color3.fromRGB(186, 85, 211)}, -- Medium Orchid
+    ["dragon cannelloni"] = {name = "Dragon Cannelloni", color = Color3.fromRGB(50, 205, 50)} -- Lime Green
 }
 
--- Convertir a hash table para búsqueda rápida
-for _, name in pairs(modelNames) do
-    targetModels[name:lower()] = name
+-- Convert to hash table for fast lookup
+for key, config in pairs(modelConfig) do
+    targetModels[key] = config
 end
 
--- Crear ScreenGui principal
+-- Constants
+local MAX_ESP_DISTANCE = 36 -- Maximum distance in studs
+local SCAN_INTERVAL = 1.5 -- Scan every 1.5 seconds
+local ESP_LABEL_SIZE = UDim2.new(0, 150, 0, 40) -- Fixed size for labels
+local SOUND_COOLDOWN = 0.3
+
+-- Create main GUI
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "ESPModelPanel"
+screenGui.Name = "EnhancedESPPanel"
 screenGui.Parent = PlayerGui
 screenGui.ResetOnSpawn = false
 
--- Frame principal del panel (más pequeño)
+-- Main panel frame
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "ESPPanel"
 mainFrame.Parent = screenGui
-mainFrame.Size = UDim2.new(0, 180, 0, 80)
-mainFrame.Position = UDim2.new(1, -190, 0, 10) -- Esquina superior derecha
+mainFrame.Size = UDim2.new(0, 200, 0, 100)
+mainFrame.Position = UDim2.new(1, -210, 0, 10)
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 mainFrame.BorderSizePixel = 0
 mainFrame.BackgroundTransparency = 0.1
 
--- Esquinas redondeadas
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 8)
 corner.Parent = mainFrame
 
--- Variable para estado del ESP
+-- ESP state variables
 local espEnabled = true
+local foundModels = {}
+local processedObjects = {}
+local lastScanTime = 0
+local lastSoundTime = 0
+local playerAttachments = {}
 
--- Botón toggle para ESP
+-- ESP Toggle Button
 local espToggle = Instance.new("TextButton")
 espToggle.Name = "ESPToggle"
 espToggle.Parent = mainFrame
-espToggle.Size = UDim2.new(1, -20, 1, -20)
+espToggle.Size = UDim2.new(1, -20, 0, 30)
 espToggle.Position = UDim2.new(0, 10, 0, 10)
-espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0) -- Verde cuando activo
+espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
 espToggle.Text = "ESP: ON"
 espToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
 espToggle.TextScaled = true
@@ -97,29 +89,42 @@ local toggleCorner = Instance.new("UICorner")
 toggleCorner.CornerRadius = UDim.new(0, 6)
 toggleCorner.Parent = espToggle
 
--- Optimizaciones de rendimiento
-local foundModels = {}
-local processedObjects = {} -- Cache para evitar procesar el mismo objeto múltiples veces
-local lastScanTime = 0
-local SCAN_INTERVAL = 2 -- Escanear cada 2 segundos en lugar de cada frame
+-- Distance display label
+local distanceLabel = Instance.new("TextLabel")
+distanceLabel.Parent = mainFrame
+distanceLabel.Size = UDim2.new(1, -20, 0, 20)
+distanceLabel.Position = UDim2.new(0, 10, 0, 45)
+distanceLabel.BackgroundTransparency = 1
+distanceLabel.Text = "Max Distance: " .. MAX_ESP_DISTANCE .. " studs"
+distanceLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+distanceLabel.TextScaled = true
+distanceLabel.Font = Enum.Font.Gotham
 
--- Variables para control de sonido
-local lastSoundTime = 0
-local SOUND_COOLDOWN = 0.5 -- Cooldown entre sonidos para evitar spam
+-- Model count display
+local countLabel = Instance.new("TextLabel")
+countLabel.Parent = mainFrame
+countLabel.Size = UDim2.new(1, -20, 0, 20)
+countLabel.Position = UDim2.new(0, 10, 0, 70)
+countLabel.BackgroundTransparency = 1
+countLabel.Text = "Models Found: 0"
+countLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+countLabel.TextScaled = true
+countLabel.Font = Enum.Font.Gotham
 
--- Sistema de Toast Notifications
-local function createToast(message)
+-- Enhanced toast notification system
+local function createToast(message, color)
+    color = color or Color3.fromRGB(40, 40, 40)
+    
     local toastGui = Instance.new("ScreenGui")
     toastGui.Name = "ToastNotification"
     toastGui.Parent = PlayerGui
     toastGui.ResetOnSpawn = false
     
     local toastFrame = Instance.new("Frame")
-    toastFrame.Name = "ToastFrame"
     toastFrame.Parent = toastGui
-    toastFrame.Size = UDim2.new(0, 300, 0, 60)
-    toastFrame.Position = UDim2.new(0.5, -150, 1, 100) -- Empieza fuera de pantalla (abajo)
-    toastFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    toastFrame.Size = UDim2.new(0, 320, 0, 60)
+    toastFrame.Position = UDim2.new(0.5, -160, 1, 100)
+    toastFrame.BackgroundColor3 = color
     toastFrame.BorderSizePixel = 0
     toastFrame.BackgroundTransparency = 0.1
     
@@ -135,80 +140,33 @@ local function createToast(message)
     toastLabel.Text = message
     toastLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     toastLabel.TextScaled = true
-    toastLabel.Font = Enum.Font.Gotham
+    toastLabel.Font = Enum.Font.GothamBold
     toastLabel.TextXAlignment = Enum.TextXAlignment.Center
     
-    -- Animación de entrada
-    toastFrame:TweenPosition(
-        UDim2.new(0.5, -150, 1, -80), -- Posición final (visible)
-        "Out",
-        "Quart",
-        0.5,
-        true
-    )
+    -- Animation
+    toastFrame:TweenPosition(UDim2.new(0.5, -160, 1, -80), "Out", "Quart", 0.5, true)
     
-    -- Esperar y animar salida
     spawn(function()
-        wait(3) -- Mostrar por 3 segundos
-        toastFrame:TweenPosition(
-            UDim2.new(0.5, -150, 1, 100), -- Volver abajo
-            "In",
-            "Quart",
-            0.5,
-            true,
-            function()
-                toastGui:Destroy() -- Limpiar después de la animación
-            end
-        )
+        wait(3)
+        toastFrame:TweenPosition(UDim2.new(0.5, -160, 1, 100), "In", "Quart", 0.5, true, function()
+            toastGui:Destroy()
+        end)
     end)
 end
 
--- Función para crear sonido sintético de notificación
+-- Enhanced sound system
 local function playNotificationSound()
     local currentTime = tick()
-    if currentTime - lastSoundTime < SOUND_COOLDOWN then
-        return -- Evitar spam de sonidos
-    end
+    if currentTime - lastSoundTime < SOUND_COOLDOWN then return end
     lastSoundTime = currentTime
     
-    -- Crear múltiples tonos para simular una melodía de notificación
-    local tones = {
-        {pitch = 2.0, duration = 0.1},
-        {pitch = 2.5, duration = 0.1},
-        {pitch = 3.0, duration = 0.2}
-    }
-    
-    for i, tone in pairs(tones) do
-        spawn(function()
-            wait((i-1) * 0.1) -- Delay entre tonos
-            local sound = Instance.new("Sound")
-            sound.SoundId = "rbxasset://sounds/electronicpingshort.wav" -- Sonido interno de Roblox
-            sound.Volume = 0.5
-            sound.Pitch = tone.pitch
-            sound.Parent = workspace
-            sound:Play()
-            
-            -- Cleanup
-            spawn(function()
-                wait(tone.duration + 0.5)
-                if sound and sound.Parent then
-                    sound:Destroy()
-                end
-            end)
-        end)
-    end
-end
-
--- Función para sonido de beep alternativo
-local function playBeepSound()
     local sound = Instance.new("Sound")
-    sound.SoundId = "rbxasset://sounds/button_rollover.wav" -- Sonido interno de Roblox
-    sound.Volume = 0.7
-    sound.Pitch = 1.8
+    sound.SoundId = "rbxasset://sounds/electronicpingshort.wav"
+    sound.Volume = 0.6
+    sound.Pitch = 2.2
     sound.Parent = workspace
     sound:Play()
     
-    -- Cleanup automático
     spawn(function()
         wait(1)
         if sound and sound.Parent then
@@ -217,75 +175,72 @@ local function playBeepSound()
     end)
 end
 
--- Función para sonido de jugador uniéndose (más distintivo)
-local function playPlayerJoinSound()
-    -- Crear secuencia de sonidos para jugador que se une
-    local sequence = {
-        {sound = "rbxasset://sounds/electronicpingshort.wav", pitch = 1.5, delay = 0},
-        {sound = "rbxasset://sounds/electronicpingshort.wav", pitch = 2.0, delay = 0.1},
-        {sound = "rbxasset://sounds/button_rollover.wav", pitch = 1.2, delay = 0.3}
-    }
-    
-    for _, note in pairs(sequence) do
-        spawn(function()
-            wait(note.delay)
-            local sound = Instance.new("Sound")
-            sound.SoundId = note.sound
-            sound.Volume = 0.6
-            sound.Pitch = note.pitch
-            sound.Parent = workspace
-            sound:Play()
-            
-            -- Cleanup
-            spawn(function()
-                wait(1)
-                if sound and sound.Parent then
-                    sound:Destroy()
-                end
-            end)
-        end)
+-- Enhanced player distance calculation
+local function getPlayerDistance(position)
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        return math.huge
     end
+    
+    local playerPosition = character.HumanoidRootPart.Position
+    return (position - playerPosition).Magnitude
 end
 
--- Función para crear label ESP con nombre
-local function createESPLabel(model, modelName)
-    -- Verificar si ya tiene label ESP
+-- Get model center position more accurately
+local function getModelCenterPosition(model)
+    local cf, size = model:GetBoundingBox()
+    return cf.Position
+end
+
+-- Enhanced ESP label creation with fixed size and color coding
+local function createESPLabel(model, config)
     if model:FindFirstChild("ESPLabel") then
         return model:FindFirstChild("ESPLabel")
     end
     
-    -- Crear BillboardGui para el label
     local billboardGui = Instance.new("BillboardGui")
     billboardGui.Name = "ESPLabel"
     billboardGui.Parent = model
-    billboardGui.Size = UDim2.new(0, 200, 0, 50)
+    billboardGui.Size = ESP_LABEL_SIZE -- Fixed size
     billboardGui.StudsOffset = Vector3.new(0, 3, 0)
-    billboardGui.AlwaysOnTop = true -- Ver a través de paredes
+    billboardGui.AlwaysOnTop = true
     billboardGui.LightInfluence = 0
+    billboardGui.MaxDistance = MAX_ESP_DISTANCE -- Built-in distance limiting
     
-    -- Crear el label con el nombre
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Parent = billboardGui
     nameLabel.Size = UDim2.new(1, 0, 1, 0)
     nameLabel.BackgroundTransparency = 1
-    nameLabel.Text = modelName
-    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 0) -- Amarillo brillante
+    nameLabel.Text = config.name
+    nameLabel.TextColor3 = config.color -- Use configured color
     nameLabel.TextStrokeTransparency = 0
-    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0) -- Contorno negro
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     nameLabel.TextScaled = true
     nameLabel.Font = Enum.Font.GothamBold
+    
+    -- Distance label
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Name = "DistanceLabel"
+    distLabel.Parent = billboardGui
+    distLabel.Size = UDim2.new(1, 0, 0.4, 0)
+    distLabel.Position = UDim2.new(0, 0, 0.6, 0)
+    distLabel.BackgroundTransparency = 1
+    distLabel.Text = "0 studs"
+    distLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    distLabel.TextStrokeTransparency = 0
+    distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    distLabel.TextScaled = true
+    distLabel.Font = Enum.Font.Gotham
     
     return billboardGui
 end
 
--- Función para crear línea ESP desde el jugador
-local function createESPLine(model)
-    -- Verificar si ya tiene línea ESP
+-- Enhanced ESP line creation
+local function createESPLine(model, config)
     if model:FindFirstChild("ESPLine") then
         return model:FindFirstChild("ESPLine")
     end
     
-    -- Crear la línea usando Beam
     local attachment0 = Instance.new("Attachment")
     attachment0.Name = "PlayerAttachment"
     
@@ -298,124 +253,102 @@ local function createESPLine(model)
     beam.Parent = model
     beam.Attachment0 = attachment0
     beam.Attachment1 = attachment1
-    beam.Color = ColorSequence.new(Color3.fromRGB(255, 0, 0)) -- Línea roja
-    beam.Width0 = 0.2
-    beam.Width1 = 0.2
-    beam.Transparency = NumberSequence.new(0.3)
+    beam.Color = ColorSequence.new(config.color) -- Use configured color
+    beam.Width0 = 0.3
+    beam.Width1 = 0.3
+    beam.Transparency = NumberSequence.new(0.4)
     beam.FaceCamera = true
     
     return beam, attachment0
 end
 
--- Tabla para almacenar attachments del jugador
-local playerAttachments = {}
-
--- Función para toggle del ESP
-local function toggleESP()
-    espEnabled = not espEnabled
-    
-    if espEnabled then
-        espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0) -- Verde
-        espToggle.Text = "ESP: ON"
-        
-        -- Reactivar todos los ESP elements
-        for model, modelName in pairs(foundModels) do
-            if model.Parent then
-                if model:FindFirstChild("ESPLabel") then
-                    model.ESPLabel.Enabled = true
-                end
-                if model:FindFirstChild("ESPLine") then
-                    model.ESPLine.Enabled = true
-                end
-            end
-        end
-    else
-        espToggle.BackgroundColor3 = Color3.fromRGB(255, 0, 0) -- Rojo
-        espToggle.Text = "ESP: OFF"
-        
-        -- Desactivar todos los ESP elements
-        for model, modelName in pairs(foundModels) do
-            if model.Parent then
-                if model:FindFirstChild("ESPLabel") then
-                    model.ESPLabel.Enabled = false
-                end
-                if model:FindFirstChild("ESPLine") then
-                    model.ESPLine.Enabled = false
-                end
-            end
-        end
-    end
-end
-
--- Conectar el botón toggle
-espToggle.MouseButton1Click:Connect(toggleESP)
-
--- Función optimizada para verificar nombre de modelo
+-- Improved model detection with fuzzy matching
 local function isTargetModel(objName)
     local lowerName = objName:lower()
-    for targetName, originalName in pairs(targetModels) do
-        if string.find(lowerName, targetName) then
-            return originalName
+    
+    -- Direct match first
+    if targetModels[lowerName] then
+        return targetModels[lowerName]
+    end
+    
+    -- Fuzzy matching for partial names
+    for targetName, config in pairs(targetModels) do
+        -- Check if any significant part of the target name is in the object name
+        local targetWords = {}
+        for word in targetName:gmatch("%S+") do
+            if #word > 2 then -- Only consider words longer than 2 characters
+                table.insert(targetWords, word)
+            end
+        end
+        
+        local matchCount = 0
+        for _, word in pairs(targetWords) do
+            if string.find(lowerName, word) then
+                matchCount = matchCount + 1
+            end
+        end
+        
+        -- If at least 60% of words match, consider it a match
+        if matchCount / #targetWords >= 0.6 then
+            return config
         end
     end
+    
     return nil
 end
 
--- Función optimizada para buscar modelos (solo cuando es necesario)
+-- Enhanced model scanning with distance checking
 local function scanForModels()
     local currentTime = tick()
-    if currentTime - lastScanTime < SCAN_INTERVAL then
-        return -- No escanear tan frecuentemente
-    end
+    if currentTime - lastScanTime < SCAN_INTERVAL then return end
     lastScanTime = currentTime
     
     local function searchInContainer(container, depth)
-        -- Limitar profundidad para evitar lag
-        if depth > 5 then return end
+        if depth > 4 then return end
         
         for _, obj in pairs(container:GetChildren()) do
-            -- Saltar si ya fue procesado
-            if processedObjects[obj] then
-                continue
-            end
+            if processedObjects[obj] then continue end
             
             if obj:IsA("Model") or obj:IsA("Part") or obj:IsA("MeshPart") then
-                local targetModelName = isTargetModel(obj.Name)
+                local config = isTargetModel(obj.Name)
                 
-                -- También verificar PrimaryPart para modelos
-                if not targetModelName and obj:IsA("Model") and obj.PrimaryPart then
-                    targetModelName = isTargetModel(obj.PrimaryPart.Name)
+                -- Check PrimaryPart for models
+                if not config and obj:IsA("Model") and obj.PrimaryPart then
+                    config = isTargetModel(obj.PrimaryPart.Name)
                 end
                 
-                if targetModelName and not foundModels[obj] then
-                    foundModels[obj] = targetModelName
+                if config and not foundModels[obj] then
+                    -- Check distance before adding
+                    local modelPosition = getModelCenterPosition(obj)
+                    local distance = getPlayerDistance(modelPosition)
                     
-                    -- Solo crear ESP si está habilitado
-                    if espEnabled then
-                        createESPLabel(obj, targetModelName)
-                        local beam, playerAttachment = createESPLine(obj)
-                        if playerAttachment then
-                            table.insert(playerAttachments, playerAttachment)
+                    if distance <= MAX_ESP_DISTANCE then
+                        foundModels[obj] = {config = config, distance = distance}
+                        
+                        if espEnabled then
+                            createESPLabel(obj, config)
+                            local beam, playerAttachment = createESPLine(obj, config)
+                            if playerAttachment then
+                                table.insert(playerAttachments, playerAttachment)
+                            end
+                        else
+                            local label = createESPLabel(obj, config)
+                            local beam, playerAttachment = createESPLine(obj, config)
+                            if playerAttachment then
+                                table.insert(playerAttachments, playerAttachment)
+                            end
+                            if label then label.Enabled = false end
+                            if beam then beam.Enabled = false end
                         end
-                    else
-                        -- Crear pero deshabilitado
-                        local label = createESPLabel(obj, targetModelName)
-                        local beam, playerAttachment = createESPLine(obj)
-                        if playerAttachment then
-                            table.insert(playerAttachments, playerAttachment)
-                        end
-                        if label then label.Enabled = false end
-                        if beam then beam.Enabled = false end
+                        
+                        playNotificationSound()
+                        createToast("Found: " .. config.name .. " (" .. math.floor(distance) .. " studs)", Color3.fromRGB(0, 150, 0))
                     end
-                    
-                    -- Reproducir sonido de modelo encontrado
-                    playNotificationSound()
                     
                     processedObjects[obj] = true
                 end
             end
             
-            -- Buscar recursivamente pero con límite de profundidad
             if (obj:IsA("Model") or obj:IsA("Folder")) and depth < 3 then
                 searchInContainer(obj, depth + 1)
             end
@@ -423,23 +356,52 @@ local function scanForModels()
     end
     
     searchInContainer(workspace, 0)
+    
+    -- Update count display
+    local count = 0
+    for _ in pairs(foundModels) do
+        count = count + 1
+    end
+    countLabel.Text = "Models Found: " .. count
 end
 
--- Función optimizada para limpiar modelos eliminados
+-- Enhanced distance update system
+local function updateDistances()
+    for model, data in pairs(foundModels) do
+        if model.Parent then
+            local modelPosition = getModelCenterPosition(model)
+            local distance = getPlayerDistance(modelPosition)
+            data.distance = distance
+            
+            -- Update distance label if ESP is active
+            if espEnabled and model:FindFirstChild("ESPLabel") and model.ESPLabel:FindFirstChild("DistanceLabel") then
+                model.ESPLabel.DistanceLabel.Text = math.floor(distance) .. " studs"
+                
+                -- Hide if too far
+                local shouldShow = distance <= MAX_ESP_DISTANCE
+                model.ESPLabel.Enabled = shouldShow
+                if model:FindFirstChild("ESPLine") then
+                    model.ESPLine.Enabled = shouldShow
+                end
+            end
+        end
+    end
+end
+
+-- Enhanced cleanup function
 local function cleanupRemovedModels()
     local toRemove = {}
     
-    for model, modelName in pairs(foundModels) do
-        if not model.Parent then
-            toRemove[model] = modelName
+    for model, data in pairs(foundModels) do
+        if not model.Parent or data.distance > MAX_ESP_DISTANCE then
+            toRemove[model] = data
         end
     end
     
-    for model, modelName in pairs(toRemove) do
+    for model, data in pairs(toRemove) do
         foundModels[model] = nil
         processedObjects[model] = nil
         
-        -- Limpiar ESP elements
         if model:FindFirstChild("ESPLabel") then
             model.ESPLabel:Destroy()
         end
@@ -452,43 +414,45 @@ local function cleanupRemovedModels()
     end
 end
 
--- Detectar cuando nuevos jugadores entran al servidor
-Players.PlayerAdded:Connect(function(player)
-    -- Crear toast notification
-    createToast("@" .. player.Name .. " se unió al servidor")
+-- Toggle ESP function
+local function toggleESP()
+    espEnabled = not espEnabled
     
-    -- Reproducir sonido especial para jugadores que se unen
-    playPlayerJoinSound()
-end)
-
--- Manejar respawn del jugador local
-LocalPlayer.CharacterAdded:Connect(function(character)
-    wait(1) -- Esperar a que el personaje se cargue completamente
-    updateESPLines()
-end)
-
--- Usar eventos en lugar de bucle constante para mejor rendimiento
-workspace.ChildAdded:Connect(function(child)
-    wait(0.1) -- Pequeña espera para que el objeto se inicialice
-    scanForModels()
-end)
-
-workspace.DescendantAdded:Connect(function(descendant)
-    if descendant:IsA("Model") or descendant:IsA("Part") or descendant:IsA("MeshPart") then
-        wait(0.1)
-        scanForModels()
+    if espEnabled then
+        espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+        espToggle.Text = "ESP: ON"
+        
+        for model, data in pairs(foundModels) do
+            if model.Parent and data.distance <= MAX_ESP_DISTANCE then
+                if model:FindFirstChild("ESPLabel") then
+                    model.ESPLabel.Enabled = true
+                end
+                if model:FindFirstChild("ESPLine") then
+                    model.ESPLine.Enabled = true
+                end
+            end
+        end
+    else
+        espToggle.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+        espToggle.Text = "ESP: OFF"
+        
+        for model, data in pairs(foundModels) do
+            if model.Parent then
+                if model:FindFirstChild("ESPLabel") then
+                    model.ESPLabel.Enabled = false
+                end
+                if model:FindFirstChild("ESPLine") then
+                    model.ESPLine.Enabled = false
+                end
+            end
+        end
     end
-end)
+end
 
--- Bucle de limpieza menos frecuente
-spawn(function()
-    while true do
-        wait(5) -- Limpiar cada 5 segundos
-        cleanupRemovedModels()
-    end
-end)
+-- Connect toggle button
+espToggle.MouseButton1Click:Connect(toggleESP)
 
--- Función para actualizar posiciones de las líneas ESP
+-- Enhanced player attachment update
 local function updateESPLines()
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then
@@ -497,14 +461,13 @@ local function updateESPLines()
     
     local rootPart = character.HumanoidRootPart
     
-    -- Actualizar todos los attachments del jugador
     for _, attachment in pairs(playerAttachments) do
         if attachment and attachment.Parent then
             attachment.Parent = rootPart
         end
     end
     
-    -- Limpiar attachments inválidos
+    -- Clean invalid attachments
     local validAttachments = {}
     for _, attachment in pairs(playerAttachments) do
         if attachment and attachment.Parent then
@@ -514,7 +477,39 @@ local function updateESPLines()
     playerAttachments = validAttachments
 end
 
--- Actualizar líneas ESP cada segundo
+-- Player events
+Players.PlayerAdded:Connect(function(player)
+    createToast("@" .. player.Name .. " joined the server", Color3.fromRGB(0, 100, 200))
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(character)
+    wait(1)
+    updateESPLines()
+end)
+
+-- Workspace events for better detection
+workspace.ChildAdded:Connect(function(child)
+    wait(0.2)
+    processedObjects[child] = nil -- Allow reprocessing of new objects
+    scanForModels()
+end)
+
+workspace.DescendantAdded:Connect(function(descendant)
+    if descendant:IsA("Model") or descendant:IsA("Part") or descendant:IsA("MeshPart") then
+        wait(0.2)
+        processedObjects[descendant] = nil
+        scanForModels()
+    end
+end)
+
+-- Main update loops
+spawn(function()
+    while true do
+        wait(2)
+        updateDistances()
+    end
+end)
+
 spawn(function()
     while true do
         wait(1)
@@ -522,10 +517,14 @@ spawn(function()
     end
 end)
 
--- Escaneo inicial
-scanForModels()
+spawn(function()
+    while true do
+        wait(5)
+        cleanupRemovedModels()
+    end
+end)
 
--- Hacer el panel draggable
+-- Make panel draggable
 local dragging = false
 local dragStart = nil
 local startPos = nil
@@ -551,4 +550,7 @@ mainFrame.InputEnded:Connect(function(input)
     end
 end)
 
-print("ESP Panel cargado - Buscando modelos específicos...")
+-- Initial scan
+scanForModels()
+
+print("Enhanced ESP Panel loaded - Improved detection with 36 studs max distance and color coding!")
