@@ -1,5 +1,5 @@
--- Enhanced ESP Panel - Fixed Version with Working Sounds and ESP
--- Features: 36 studs max distance, color coding, anchored sizes, improved detection
+-- Mini Panel ESP Optimizado (Sin Lag)
+-- Ubicación: Esquina superior derecha
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -8,11 +8,11 @@ local SoundService = game:GetService("SoundService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Enhanced model detection with color coding (keeping original structure)
+-- Lista de modelos a detectar (convertida a hash table para búsqueda O(1))
 local targetModels = {}
 local modelNames = {
     "La Extinct Grande",
-    "Graipuss Medussi", 
+    "Graipuss Medussi",
     "Nooo My Hotspot",
     "Pot Hotspot",
     "La Sahur Combinasion",
@@ -33,39 +33,10 @@ local modelNames = {
     "Dragon Cannelloni"
 }
 
--- Color assignment for each model
-local modelColors = {
-    ["la extinct grande"] = Color3.fromRGB(255, 0, 0), -- Red
-    ["graipuss medussi"] = Color3.fromRGB(0, 255, 0), -- Green
-    ["nooo my hotspot"] = Color3.fromRGB(0, 0, 255), -- Blue
-    ["pot hotspot"] = Color3.fromRGB(255, 255, 0), -- Yellow
-    ["la sahur combinasion"] = Color3.fromRGB(255, 0, 255), -- Magenta
-    ["chicleteira bicicleteira"] = Color3.fromRGB(0, 255, 255), -- Cyan
-    ["spaghetti tualetti"] = Color3.fromRGB(255, 165, 0), -- Orange
-    ["esok sekolah"] = Color3.fromRGB(128, 0, 128), -- Purple
-    ["los nooo my hotspotsitos"] = Color3.fromRGB(255, 192, 203), -- Pink
-    ["la grande combinassion"] = Color3.fromRGB(173, 216, 230), -- Light Blue
-    ["los combinasionas"] = Color3.fromRGB(144, 238, 144), -- Light Green
-    ["nuclearo dinosauro"] = Color3.fromRGB(255, 69, 0), -- Red Orange
-    ["los hotspositos"] = Color3.fromRGB(75, 0, 130), -- Indigo
-    ["tralalalaledon"] = Color3.fromRGB(255, 215, 0), -- Gold
-    ["ketupat kepat"] = Color3.fromRGB(127, 255, 212), -- Aquamarine
-    ["los bros"] = Color3.fromRGB(220, 20, 60), -- Crimson
-    ["la supreme combinasion"] = Color3.fromRGB(255, 140, 0), -- Dark Orange
-    ["ketchuru and masturu"] = Color3.fromRGB(102, 205, 170), -- Medium Aquamarine
-    ["garama and madundung"] = Color3.fromRGB(186, 85, 211), -- Medium Orchid
-    ["dragon cannelloni"] = Color3.fromRGB(50, 205, 50) -- Lime Green
-}
-
--- Convert to hash table for búsqueda O(1)
+-- Convertir a hash table para búsqueda rápida
 for _, name in pairs(modelNames) do
     targetModels[name:lower()] = name
 end
-
--- Constants
-local MAX_ESP_DISTANCE = 36 -- Maximum distance in studs
-local SCAN_INTERVAL = 2 -- Scan every 2 seconds
-local SOUND_COOLDOWN = 0.5
 
 -- Crear ScreenGui principal
 local screenGui = Instance.new("ScreenGui")
@@ -73,12 +44,12 @@ screenGui.Name = "ESPModelPanel"
 screenGui.Parent = PlayerGui
 screenGui.ResetOnSpawn = false
 
--- Frame principal del panel
+-- Frame principal del panel (más pequeño)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "ESPPanel"
 mainFrame.Parent = screenGui
-mainFrame.Size = UDim2.new(0, 200, 0, 120)
-mainFrame.Position = UDim2.new(1, -210, 0, 10)
+mainFrame.Size = UDim2.new(0, 180, 0, 80)
+mainFrame.Position = UDim2.new(1, -190, 0, 10) -- Esquina superior derecha
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 mainFrame.BorderSizePixel = 0
 mainFrame.BackgroundTransparency = 0.1
@@ -88,21 +59,16 @@ local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 8)
 corner.Parent = mainFrame
 
--- Variables
+-- Variable para estado del ESP
 local espEnabled = true
-local foundModels = {}
-local processedObjects = {}
-local lastScanTime = 0
-local lastSoundTime = 0
-local playerAttachments = {}
 
 -- Botón toggle para ESP
 local espToggle = Instance.new("TextButton")
 espToggle.Name = "ESPToggle"
 espToggle.Parent = mainFrame
-espToggle.Size = UDim2.new(1, -20, 0, 30)
+espToggle.Size = UDim2.new(1, -20, 1, -20)
 espToggle.Position = UDim2.new(0, 10, 0, 10)
-espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0) -- Verde cuando activo
 espToggle.Text = "ESP: ON"
 espToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
 espToggle.TextScaled = true
@@ -113,29 +79,17 @@ local toggleCorner = Instance.new("UICorner")
 toggleCorner.CornerRadius = UDim.new(0, 6)
 toggleCorner.Parent = espToggle
 
--- Distance display
-local distanceLabel = Instance.new("TextLabel")
-distanceLabel.Parent = mainFrame
-distanceLabel.Size = UDim2.new(1, -20, 0, 20)
-distanceLabel.Position = UDim2.new(0, 10, 0, 45)
-distanceLabel.BackgroundTransparency = 1
-distanceLabel.Text = "Max Distance: " .. MAX_ESP_DISTANCE .. " studs"
-distanceLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-distanceLabel.TextScaled = true
-distanceLabel.Font = Enum.Font.Gotham
+-- Optimizaciones de rendimiento
+local foundModels = {}
+local processedObjects = {} -- Cache para evitar procesar el mismo objeto múltiples veces
+local lastScanTime = 0
+local SCAN_INTERVAL = 2 -- Escanear cada 2 segundos en lugar de cada frame
 
--- Model count
-local countLabel = Instance.new("TextLabel")
-countLabel.Parent = mainFrame
-countLabel.Size = UDim2.new(1, -20, 0, 20)
-countLabel.Position = UDim2.new(0, 10, 0, 70)
-countLabel.BackgroundTransparency = 1
-countLabel.Text = "Models Found: 0"
-countLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-countLabel.TextScaled = true
-countLabel.Font = Enum.Font.Gotham
+-- Variables para control de sonido
+local lastSoundTime = 0
+local SOUND_COOLDOWN = 0.5 -- Cooldown entre sonidos para evitar spam
 
--- Sistema de Toast Notifications (FIXED)
+-- Sistema de Toast Notifications
 local function createToast(message)
     local toastGui = Instance.new("ScreenGui")
     toastGui.Name = "ToastNotification"
@@ -146,7 +100,7 @@ local function createToast(message)
     toastFrame.Name = "ToastFrame"
     toastFrame.Parent = toastGui
     toastFrame.Size = UDim2.new(0, 300, 0, 60)
-    toastFrame.Position = UDim2.new(0.5, -150, 1, 100)
+    toastFrame.Position = UDim2.new(0.5, -150, 1, 100) -- Empieza fuera de pantalla (abajo)
     toastFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     toastFrame.BorderSizePixel = 0
     toastFrame.BackgroundTransparency = 0.1
@@ -168,36 +122,38 @@ local function createToast(message)
     
     -- Animación de entrada
     toastFrame:TweenPosition(
-        UDim2.new(0.5, -150, 1, -80),
+        UDim2.new(0.5, -150, 1, -80), -- Posición final (visible)
         "Out",
         "Quart",
         0.5,
         true
     )
     
+    -- Esperar y animar salida
     spawn(function()
-        wait(3)
+        wait(3) -- Mostrar por 3 segundos
         toastFrame:TweenPosition(
-            UDim2.new(0.5, -150, 1, 100),
+            UDim2.new(0.5, -150, 1, 100), -- Volver abajo
             "In",
             "Quart",
             0.5,
             true,
             function()
-                toastGui:Destroy()
+                toastGui:Destroy() -- Limpiar después de la animación
             end
         )
     end)
 end
 
--- FIXED sound functions - restored original working code
+-- Función para crear sonido sintético de notificación
 local function playNotificationSound()
     local currentTime = tick()
     if currentTime - lastSoundTime < SOUND_COOLDOWN then
-        return
+        return -- Evitar spam de sonidos
     end
     lastSoundTime = currentTime
     
+    -- Crear múltiples tonos para simular una melodía de notificación
     local tones = {
         {pitch = 2.0, duration = 0.1},
         {pitch = 2.5, duration = 0.1},
@@ -206,14 +162,15 @@ local function playNotificationSound()
     
     for i, tone in pairs(tones) do
         spawn(function()
-            wait((i-1) * 0.1)
+            wait((i-1) * 0.1) -- Delay entre tonos
             local sound = Instance.new("Sound")
-            sound.SoundId = "rbxasset://sounds/electronicpingshort.wav"
+            sound.SoundId = "rbxasset://sounds/electronicpingshort.wav" -- Sonido interno de Roblox
             sound.Volume = 0.5
             sound.Pitch = tone.pitch
             sound.Parent = workspace
             sound:Play()
             
+            -- Cleanup
             spawn(function()
                 wait(tone.duration + 0.5)
                 if sound and sound.Parent then
@@ -224,7 +181,27 @@ local function playNotificationSound()
     end
 end
 
+-- Función para sonido de beep alternativo
+local function playBeepSound()
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxasset://sounds/button_rollover.wav" -- Sonido interno de Roblox
+    sound.Volume = 0.7
+    sound.Pitch = 1.8
+    sound.Parent = workspace
+    sound:Play()
+    
+    -- Cleanup automático
+    spawn(function()
+        wait(1)
+        if sound and sound.Parent then
+            sound:Destroy()
+        end
+    end)
+end
+
+-- Función para sonido de jugador uniéndose (más distintivo)
 local function playPlayerJoinSound()
+    -- Crear secuencia de sonidos para jugador que se une
     local sequence = {
         {sound = "rbxasset://sounds/electronicpingshort.wav", pitch = 1.5, delay = 0},
         {sound = "rbxasset://sounds/electronicpingshort.wav", pitch = 2.0, delay = 0.1},
@@ -241,6 +218,7 @@ local function playPlayerJoinSound()
             sound.Parent = workspace
             sound:Play()
             
+            -- Cleanup
             spawn(function()
                 wait(1)
                 if sound and sound.Parent then
@@ -251,78 +229,45 @@ local function playPlayerJoinSound()
     end
 end
 
--- Get model distance
-local function getPlayerDistance(model)
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then
-        return math.huge
-    end
-    
-    local modelPosition
-    if model:IsA("Model") then
-        local cf, size = model:GetBoundingBox()
-        modelPosition = cf.Position
-    else
-        modelPosition = model.Position
-    end
-    
-    local playerPosition = character.HumanoidRootPart.Position
-    return (modelPosition - playerPosition).Magnitude
-end
-
--- Get model color
-local function getModelColor(modelName)
-    return modelColors[modelName:lower()] or Color3.fromRGB(255, 255, 0)
-end
-
--- FIXED ESP label creation with color coding and anchored size
+-- Función para crear label ESP con nombre
 local function createESPLabel(model, modelName)
+    -- Verificar si ya tiene label ESP
     if model:FindFirstChild("ESPLabel") then
         return model:FindFirstChild("ESPLabel")
     end
     
+    -- Crear BillboardGui para el label
     local billboardGui = Instance.new("BillboardGui")
     billboardGui.Name = "ESPLabel"
     billboardGui.Parent = model
-    billboardGui.Size = UDim2.new(0, 150, 0, 50) -- Fixed anchored size
+    billboardGui.Size = UDim2.new(0, 200, 0, 50)
     billboardGui.StudsOffset = Vector3.new(0, 3, 0)
-    billboardGui.AlwaysOnTop = true
+    billboardGui.AlwaysOnTop = true -- Ver a través de paredes
     billboardGui.LightInfluence = 0
     
+    -- Crear el label con el nombre
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Parent = billboardGui
-    nameLabel.Size = UDim2.new(1, 0, 0.7, 0)
+    nameLabel.Size = UDim2.new(1, 0, 1, 0)
     nameLabel.BackgroundTransparency = 1
     nameLabel.Text = modelName
-    nameLabel.TextColor3 = getModelColor(modelName) -- Apply color coding
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 0) -- Amarillo brillante
     nameLabel.TextStrokeTransparency = 0
-    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0) -- Contorno negro
     nameLabel.TextScaled = true
     nameLabel.Font = Enum.Font.GothamBold
-    
-    -- Distance label
-    local distLabel = Instance.new("TextLabel")
-    distLabel.Name = "DistanceLabel"
-    distLabel.Parent = billboardGui
-    distLabel.Size = UDim2.new(1, 0, 0.3, 0)
-    distLabel.Position = UDim2.new(0, 0, 0.7, 0)
-    distLabel.BackgroundTransparency = 1
-    distLabel.Text = "0m"
-    distLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    distLabel.TextStrokeTransparency = 0
-    distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    distLabel.TextScaled = true
-    distLabel.Font = Enum.Font.Gotham
     
     return billboardGui
 end
 
--- FIXED ESP line creation with color coding
-local function createESPLine(model, modelName)
+-- Función para crear línea ESP desde el jugador
+local function createESPLine(model)
+    -- Verificar si ya tiene línea ESP
     if model:FindFirstChild("ESPLine") then
         return model:FindFirstChild("ESPLine")
     end
     
+    -- Crear la línea usando Beam
     local attachment0 = Instance.new("Attachment")
     attachment0.Name = "PlayerAttachment"
     
@@ -335,7 +280,7 @@ local function createESPLine(model, modelName)
     beam.Parent = model
     beam.Attachment0 = attachment0
     beam.Attachment1 = attachment1
-    beam.Color = ColorSequence.new(getModelColor(modelName)) -- Apply color coding
+    beam.Color = ColorSequence.new(Color3.fromRGB(255, 0, 0)) -- Línea roja
     beam.Width0 = 0.2
     beam.Width1 = 0.2
     beam.Transparency = NumberSequence.new(0.3)
@@ -344,31 +289,33 @@ local function createESPLine(model, modelName)
     return beam, attachment0
 end
 
--- Toggle ESP function
+-- Tabla para almacenar attachments del jugador
+local playerAttachments = {}
+
+-- Función para toggle del ESP
 local function toggleESP()
     espEnabled = not espEnabled
     
     if espEnabled then
-        espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+        espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0) -- Verde
         espToggle.Text = "ESP: ON"
         
+        -- Reactivar todos los ESP elements
         for model, modelName in pairs(foundModels) do
             if model.Parent then
-                local distance = getPlayerDistance(model)
-                if distance <= MAX_ESP_DISTANCE then
-                    if model:FindFirstChild("ESPLabel") then
-                        model.ESPLabel.Enabled = true
-                    end
-                    if model:FindFirstChild("ESPLine") then
-                        model.ESPLine.Enabled = true
-                    end
+                if model:FindFirstChild("ESPLabel") then
+                    model.ESPLabel.Enabled = true
+                end
+                if model:FindFirstChild("ESPLine") then
+                    model.ESPLine.Enabled = true
                 end
             end
         end
     else
-        espToggle.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+        espToggle.BackgroundColor3 = Color3.fromRGB(255, 0, 0) -- Rojo
         espToggle.Text = "ESP: OFF"
         
+        -- Desactivar todos los ESP elements
         for model, modelName in pairs(foundModels) do
             if model.Parent then
                 if model:FindFirstChild("ESPLabel") then
@@ -382,9 +329,10 @@ local function toggleESP()
     end
 end
 
+-- Conectar el botón toggle
 espToggle.MouseButton1Click:Connect(toggleESP)
 
--- FIXED model detection function (restored original logic)
+-- Función optimizada para verificar nombre de modelo
 local function isTargetModel(objName)
     local lowerName = objName:lower()
     for targetName, originalName in pairs(targetModels) do
@@ -395,18 +343,20 @@ local function isTargetModel(objName)
     return nil
 end
 
--- Enhanced scan function with distance checking
+-- Función optimizada para buscar modelos (solo cuando es necesario)
 local function scanForModels()
     local currentTime = tick()
     if currentTime - lastScanTime < SCAN_INTERVAL then
-        return
+        return -- No escanear tan frecuentemente
     end
     lastScanTime = currentTime
     
     local function searchInContainer(container, depth)
+        -- Limitar profundidad para evitar lag
         if depth > 5 then return end
         
         for _, obj in pairs(container:GetChildren()) do
+            -- Saltar si ya fue procesado
             if processedObjects[obj] then
                 continue
             end
@@ -414,41 +364,40 @@ local function scanForModels()
             if obj:IsA("Model") or obj:IsA("Part") or obj:IsA("MeshPart") then
                 local targetModelName = isTargetModel(obj.Name)
                 
+                -- También verificar PrimaryPart para modelos
                 if not targetModelName and obj:IsA("Model") and obj.PrimaryPart then
                     targetModelName = isTargetModel(obj.PrimaryPart.Name)
                 end
                 
                 if targetModelName and not foundModels[obj] then
-                    -- Check distance
-                    local distance = getPlayerDistance(obj)
+                    foundModels[obj] = targetModelName
                     
-                    if distance <= MAX_ESP_DISTANCE then
-                        foundModels[obj] = targetModelName
-                        
-                        if espEnabled then
-                            createESPLabel(obj, targetModelName)
-                            local beam, playerAttachment = createESPLine(obj, targetModelName)
-                            if playerAttachment then
-                                table.insert(playerAttachments, playerAttachment)
-                            end
-                        else
-                            local label = createESPLabel(obj, targetModelName)
-                            local beam, playerAttachment = createESPLine(obj, targetModelName)
-                            if playerAttachment then
-                                table.insert(playerAttachments, playerAttachment)
-                            end
-                            if label then label.Enabled = false end
-                            if beam then beam.Enabled = false end
+                    -- Solo crear ESP si está habilitado
+                    if espEnabled then
+                        createESPLabel(obj, targetModelName)
+                        local beam, playerAttachment = createESPLine(obj)
+                        if playerAttachment then
+                            table.insert(playerAttachments, playerAttachment)
                         end
-                        
-                        playNotificationSound()
-                        createToast("Found: " .. targetModelName)
+                    else
+                        -- Crear pero deshabilitado
+                        local label = createESPLabel(obj, targetModelName)
+                        local beam, playerAttachment = createESPLine(obj)
+                        if playerAttachment then
+                            table.insert(playerAttachments, playerAttachment)
+                        end
+                        if label then label.Enabled = false end
+                        if beam then beam.Enabled = false end
                     end
+                    
+                    -- Reproducir sonido de modelo encontrado
+                    playNotificationSound()
                     
                     processedObjects[obj] = true
                 end
             end
             
+            -- Buscar recursivamente pero con límite de profundidad
             if (obj:IsA("Model") or obj:IsA("Folder")) and depth < 3 then
                 searchInContainer(obj, depth + 1)
             end
@@ -456,36 +405,9 @@ local function scanForModels()
     end
     
     searchInContainer(workspace, 0)
-    
-    -- Update count
-    local count = 0
-    for _ in pairs(foundModels) do
-        count = count + 1
-    end
-    countLabel.Text = "Models Found: " .. count
 end
 
--- Update distances and visibility
-local function updateDistances()
-    for model, modelName in pairs(foundModels) do
-        if model.Parent then
-            local distance = getPlayerDistance(model)
-            
-            if model:FindFirstChild("ESPLabel") and model.ESPLabel:FindFirstChild("DistanceLabel") then
-                model.ESPLabel.DistanceLabel.Text = math.floor(distance) .. "m"
-                
-                -- Show/hide based on distance
-                local shouldShow = distance <= MAX_ESP_DISTANCE and espEnabled
-                model.ESPLabel.Enabled = shouldShow
-                if model:FindFirstChild("ESPLine") then
-                    model.ESPLine.Enabled = shouldShow
-                end
-            end
-        end
-    end
-end
-
--- Cleanup function
+-- Función optimizada para limpiar modelos eliminados
 local function cleanupRemovedModels()
     local toRemove = {}
     
@@ -499,6 +421,7 @@ local function cleanupRemovedModels()
         foundModels[model] = nil
         processedObjects[model] = nil
         
+        -- Limpiar ESP elements
         if model:FindFirstChild("ESPLabel") then
             model.ESPLabel:Destroy()
         end
@@ -511,44 +434,24 @@ local function cleanupRemovedModels()
     end
 end
 
--- Update ESP lines
-local function updateESPLines()
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then
-        return
-    end
-    
-    local rootPart = character.HumanoidRootPart
-    
-    for _, attachment in pairs(playerAttachments) do
-        if attachment and attachment.Parent then
-            attachment.Parent = rootPart
-        end
-    end
-    
-    local validAttachments = {}
-    for _, attachment in pairs(playerAttachments) do
-        if attachment and attachment.Parent then
-            table.insert(validAttachments, attachment)
-        end
-    end
-    playerAttachments = validAttachments
-end
-
--- FIXED Player events (restored original working code)
+-- Detectar cuando nuevos jugadores entran al servidor
 Players.PlayerAdded:Connect(function(player)
+    -- Crear toast notification
     createToast("@" .. player.Name .. " se unió al servidor")
+    
+    -- Reproducir sonido especial para jugadores que se unen
     playPlayerJoinSound()
 end)
 
+-- Manejar respawn del jugador local
 LocalPlayer.CharacterAdded:Connect(function(character)
-    wait(1)
+    wait(1) -- Esperar a que el personaje se cargue completamente
     updateESPLines()
 end)
 
--- Event connections
+-- Usar eventos en lugar de bucle constante para mejor rendimiento
 workspace.ChildAdded:Connect(function(child)
-    wait(0.1)
+    wait(0.1) -- Pequeña espera para que el objeto se inicialice
     scanForModels()
 end)
 
@@ -559,14 +462,41 @@ workspace.DescendantAdded:Connect(function(descendant)
     end
 end)
 
--- Main loops
+-- Bucle de limpieza menos frecuente
 spawn(function()
     while true do
-        wait(1)
-        updateDistances()
+        wait(5) -- Limpiar cada 5 segundos
+        cleanupRemovedModels()
     end
 end)
 
+-- Función para actualizar posiciones de las líneas ESP
+local function updateESPLines()
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        return
+    end
+    
+    local rootPart = character.HumanoidRootPart
+    
+    -- Actualizar todos los attachments del jugador
+    for _, attachment in pairs(playerAttachments) do
+        if attachment and attachment.Parent then
+            attachment.Parent = rootPart
+        end
+    end
+    
+    -- Limpiar attachments inválidos
+    local validAttachments = {}
+    for _, attachment in pairs(playerAttachments) do
+        if attachment and attachment.Parent then
+            table.insert(validAttachments, attachment)
+        end
+    end
+    playerAttachments = validAttachments
+end
+
+-- Actualizar líneas ESP cada segundo
 spawn(function()
     while true do
         wait(1)
@@ -574,14 +504,10 @@ spawn(function()
     end
 end)
 
-spawn(function()
-    while true do
-        wait(5)
-        cleanupRemovedModels()
-    end
-end)
+-- Escaneo inicial
+scanForModels()
 
--- Make draggable
+-- Hacer el panel draggable
 local dragging = false
 local dragStart = nil
 local startPos = nil
@@ -607,7 +533,4 @@ mainFrame.InputEnded:Connect(function(input)
     end
 end)
 
--- Initial scan
-scanForModels()
-
-print("Fixed ESP Panel loaded - Working sounds, ESP detection, 36 studs max, and color coding!")
+print("ESP Panel cargado - Buscando modelos específicos...")
