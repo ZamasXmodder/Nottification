@@ -1,5 +1,5 @@
--- Enhanced ESP Panel with Improved Detection and Features
--- Features: 36 studs max distance, color coding, anchored sizes, better detection
+-- Enhanced ESP Panel - Fixed Version with Working Sounds and ESP
+-- Features: 36 studs max distance, color coding, anchored sizes, improved detection
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -8,63 +8,87 @@ local SoundService = game:GetService("SoundService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Enhanced model detection with color coding
+-- Enhanced model detection with color coding (keeping original structure)
 local targetModels = {}
-local modelConfig = {
-    ["la extinct grande"] = {name = "La Extinct Grande", color = Color3.fromRGB(255, 0, 0)}, -- Red
-    ["graipuss medussi"] = {name = "Graipuss Medussi", color = Color3.fromRGB(0, 255, 0)}, -- Green
-    ["nooo my hotspot"] = {name = "Nooo My Hotspot", color = Color3.fromRGB(0, 0, 255)}, -- Blue
-    ["pot hotspot"] = {name = "Pot Hotspot", color = Color3.fromRGB(255, 255, 0)}, -- Yellow
-    ["la sahur combinasion"] = {name = "La Sahur Combinasion", color = Color3.fromRGB(255, 0, 255)}, -- Magenta
-    ["chicleteira bicicleteira"] = {name = "Chicleteira Bicicleteira", color = Color3.fromRGB(0, 255, 255)}, -- Cyan
-    ["spaghetti tualetti"] = {name = "Spaghetti Tualetti", color = Color3.fromRGB(255, 165, 0)}, -- Orange
-    ["esok sekolah"] = {name = "Esok Sekolah", color = Color3.fromRGB(128, 0, 128)}, -- Purple
-    ["los nooo my hotspotsitos"] = {name = "Los Nooo My Hotspotsitos", color = Color3.fromRGB(255, 192, 203)}, -- Pink
-    ["la grande combinassion"] = {name = "La Grande Combinassion", color = Color3.fromRGB(173, 216, 230)}, -- Light Blue
-    ["los combinasionas"] = {name = "Los Combinasionas", color = Color3.fromRGB(144, 238, 144)}, -- Light Green
-    ["nuclearo dinosauro"] = {name = "Nuclearo Dinosauro", color = Color3.fromRGB(255, 69, 0)}, -- Red Orange
-    ["los hotspositos"] = {name = "Los Hotspositos", color = Color3.fromRGB(75, 0, 130)}, -- Indigo
-    ["tralalalaledon"] = {name = "Tralalalaledon", color = Color3.fromRGB(255, 215, 0)}, -- Gold
-    ["ketupat kepat"] = {name = "Ketupat Kepat", color = Color3.fromRGB(127, 255, 212)}, -- Aquamarine
-    ["los bros"] = {name = "Los Bros", color = Color3.fromRGB(220, 20, 60)}, -- Crimson
-    ["la supreme combinasion"] = {name = "La Supreme Combinasion", color = Color3.fromRGB(255, 140, 0)}, -- Dark Orange
-    ["ketchuru and masturu"] = {name = "Ketchuru and Masturu", color = Color3.fromRGB(102, 205, 170)}, -- Medium Aquamarine
-    ["garama and madundung"] = {name = "Garama and Madundung", color = Color3.fromRGB(186, 85, 211)}, -- Medium Orchid
-    ["dragon cannelloni"] = {name = "Dragon Cannelloni", color = Color3.fromRGB(50, 205, 50)} -- Lime Green
+local modelNames = {
+    "La Extinct Grande",
+    "Graipuss Medussi", 
+    "Nooo My Hotspot",
+    "Pot Hotspot",
+    "La Sahur Combinasion",
+    "Chicleteira Bicicleteira",
+    "Spaghetti Tualetti",
+    "Esok Sekolah",
+    "Los Nooo My Hotspotsitos",
+    "La Grande Combinassion",
+    "Los Combinasionas",
+    "Nuclearo Dinosauro",
+    "Los Hotspositos",
+    "Tralalalaledon",
+    "Ketupat Kepat",
+    "Los Bros",
+    "La Supreme Combinasion",
+    "Ketchuru and Masturu",
+    "Garama and Madundung",
+    "Dragon Cannelloni"
 }
 
--- Convert to hash table for fast lookup
-for key, config in pairs(modelConfig) do
-    targetModels[key] = config
+-- Color assignment for each model
+local modelColors = {
+    ["la extinct grande"] = Color3.fromRGB(255, 0, 0), -- Red
+    ["graipuss medussi"] = Color3.fromRGB(0, 255, 0), -- Green
+    ["nooo my hotspot"] = Color3.fromRGB(0, 0, 255), -- Blue
+    ["pot hotspot"] = Color3.fromRGB(255, 255, 0), -- Yellow
+    ["la sahur combinasion"] = Color3.fromRGB(255, 0, 255), -- Magenta
+    ["chicleteira bicicleteira"] = Color3.fromRGB(0, 255, 255), -- Cyan
+    ["spaghetti tualetti"] = Color3.fromRGB(255, 165, 0), -- Orange
+    ["esok sekolah"] = Color3.fromRGB(128, 0, 128), -- Purple
+    ["los nooo my hotspotsitos"] = Color3.fromRGB(255, 192, 203), -- Pink
+    ["la grande combinassion"] = Color3.fromRGB(173, 216, 230), -- Light Blue
+    ["los combinasionas"] = Color3.fromRGB(144, 238, 144), -- Light Green
+    ["nuclearo dinosauro"] = Color3.fromRGB(255, 69, 0), -- Red Orange
+    ["los hotspositos"] = Color3.fromRGB(75, 0, 130), -- Indigo
+    ["tralalalaledon"] = Color3.fromRGB(255, 215, 0), -- Gold
+    ["ketupat kepat"] = Color3.fromRGB(127, 255, 212), -- Aquamarine
+    ["los bros"] = Color3.fromRGB(220, 20, 60), -- Crimson
+    ["la supreme combinasion"] = Color3.fromRGB(255, 140, 0), -- Dark Orange
+    ["ketchuru and masturu"] = Color3.fromRGB(102, 205, 170), -- Medium Aquamarine
+    ["garama and madundung"] = Color3.fromRGB(186, 85, 211), -- Medium Orchid
+    ["dragon cannelloni"] = Color3.fromRGB(50, 205, 50) -- Lime Green
+}
+
+-- Convert to hash table for búsqueda O(1)
+for _, name in pairs(modelNames) do
+    targetModels[name:lower()] = name
 end
 
 -- Constants
 local MAX_ESP_DISTANCE = 36 -- Maximum distance in studs
-local SCAN_INTERVAL = 1.5 -- Scan every 1.5 seconds
-local ESP_LABEL_SIZE = UDim2.new(0, 150, 0, 40) -- Fixed size for labels
-local SOUND_COOLDOWN = 0.3
+local SCAN_INTERVAL = 2 -- Scan every 2 seconds
+local SOUND_COOLDOWN = 0.5
 
--- Create main GUI
+-- Crear ScreenGui principal
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "EnhancedESPPanel"
+screenGui.Name = "ESPModelPanel"
 screenGui.Parent = PlayerGui
 screenGui.ResetOnSpawn = false
 
--- Main panel frame
+-- Frame principal del panel
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "ESPPanel"
 mainFrame.Parent = screenGui
-mainFrame.Size = UDim2.new(0, 200, 0, 100)
+mainFrame.Size = UDim2.new(0, 200, 0, 120)
 mainFrame.Position = UDim2.new(1, -210, 0, 10)
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 mainFrame.BorderSizePixel = 0
 mainFrame.BackgroundTransparency = 0.1
 
+-- Esquinas redondeadas
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 8)
 corner.Parent = mainFrame
 
--- ESP state variables
+-- Variables
 local espEnabled = true
 local foundModels = {}
 local processedObjects = {}
@@ -72,7 +96,7 @@ local lastScanTime = 0
 local lastSoundTime = 0
 local playerAttachments = {}
 
--- ESP Toggle Button
+-- Botón toggle para ESP
 local espToggle = Instance.new("TextButton")
 espToggle.Name = "ESPToggle"
 espToggle.Parent = mainFrame
@@ -89,7 +113,7 @@ local toggleCorner = Instance.new("UICorner")
 toggleCorner.CornerRadius = UDim.new(0, 6)
 toggleCorner.Parent = espToggle
 
--- Distance display label
+-- Distance display
 local distanceLabel = Instance.new("TextLabel")
 distanceLabel.Parent = mainFrame
 distanceLabel.Size = UDim2.new(1, -20, 0, 20)
@@ -100,7 +124,7 @@ distanceLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 distanceLabel.TextScaled = true
 distanceLabel.Font = Enum.Font.Gotham
 
--- Model count display
+-- Model count
 local countLabel = Instance.new("TextLabel")
 countLabel.Parent = mainFrame
 countLabel.Size = UDim2.new(1, -20, 0, 20)
@@ -111,20 +135,19 @@ countLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 countLabel.TextScaled = true
 countLabel.Font = Enum.Font.Gotham
 
--- Enhanced toast notification system
-local function createToast(message, color)
-    color = color or Color3.fromRGB(40, 40, 40)
-    
+-- Sistema de Toast Notifications (FIXED)
+local function createToast(message)
     local toastGui = Instance.new("ScreenGui")
     toastGui.Name = "ToastNotification"
     toastGui.Parent = PlayerGui
     toastGui.ResetOnSpawn = false
     
     local toastFrame = Instance.new("Frame")
+    toastFrame.Name = "ToastFrame"
     toastFrame.Parent = toastGui
-    toastFrame.Size = UDim2.new(0, 320, 0, 60)
-    toastFrame.Position = UDim2.new(0.5, -160, 1, 100)
-    toastFrame.BackgroundColor3 = color
+    toastFrame.Size = UDim2.new(0, 300, 0, 60)
+    toastFrame.Position = UDim2.new(0.5, -150, 1, 100)
+    toastFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     toastFrame.BorderSizePixel = 0
     toastFrame.BackgroundTransparency = 0.1
     
@@ -140,60 +163,120 @@ local function createToast(message, color)
     toastLabel.Text = message
     toastLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     toastLabel.TextScaled = true
-    toastLabel.Font = Enum.Font.GothamBold
+    toastLabel.Font = Enum.Font.Gotham
     toastLabel.TextXAlignment = Enum.TextXAlignment.Center
     
-    -- Animation
-    toastFrame:TweenPosition(UDim2.new(0.5, -160, 1, -80), "Out", "Quart", 0.5, true)
+    -- Animación de entrada
+    toastFrame:TweenPosition(
+        UDim2.new(0.5, -150, 1, -80),
+        "Out",
+        "Quart",
+        0.5,
+        true
+    )
     
     spawn(function()
         wait(3)
-        toastFrame:TweenPosition(UDim2.new(0.5, -160, 1, 100), "In", "Quart", 0.5, true, function()
-            toastGui:Destroy()
-        end)
+        toastFrame:TweenPosition(
+            UDim2.new(0.5, -150, 1, 100),
+            "In",
+            "Quart",
+            0.5,
+            true,
+            function()
+                toastGui:Destroy()
+            end
+        )
     end)
 end
 
--- Enhanced sound system
+-- FIXED sound functions - restored original working code
 local function playNotificationSound()
     local currentTime = tick()
-    if currentTime - lastSoundTime < SOUND_COOLDOWN then return end
+    if currentTime - lastSoundTime < SOUND_COOLDOWN then
+        return
+    end
     lastSoundTime = currentTime
     
-    local sound = Instance.new("Sound")
-    sound.SoundId = "rbxasset://sounds/electronicpingshort.wav"
-    sound.Volume = 0.6
-    sound.Pitch = 2.2
-    sound.Parent = workspace
-    sound:Play()
+    local tones = {
+        {pitch = 2.0, duration = 0.1},
+        {pitch = 2.5, duration = 0.1},
+        {pitch = 3.0, duration = 0.2}
+    }
     
-    spawn(function()
-        wait(1)
-        if sound and sound.Parent then
-            sound:Destroy()
-        end
-    end)
+    for i, tone in pairs(tones) do
+        spawn(function()
+            wait((i-1) * 0.1)
+            local sound = Instance.new("Sound")
+            sound.SoundId = "rbxasset://sounds/electronicpingshort.wav"
+            sound.Volume = 0.5
+            sound.Pitch = tone.pitch
+            sound.Parent = workspace
+            sound:Play()
+            
+            spawn(function()
+                wait(tone.duration + 0.5)
+                if sound and sound.Parent then
+                    sound:Destroy()
+                end
+            end)
+        end)
+    end
 end
 
--- Enhanced player distance calculation
-local function getPlayerDistance(position)
+local function playPlayerJoinSound()
+    local sequence = {
+        {sound = "rbxasset://sounds/electronicpingshort.wav", pitch = 1.5, delay = 0},
+        {sound = "rbxasset://sounds/electronicpingshort.wav", pitch = 2.0, delay = 0.1},
+        {sound = "rbxasset://sounds/button_rollover.wav", pitch = 1.2, delay = 0.3}
+    }
+    
+    for _, note in pairs(sequence) do
+        spawn(function()
+            wait(note.delay)
+            local sound = Instance.new("Sound")
+            sound.SoundId = note.sound
+            sound.Volume = 0.6
+            sound.Pitch = note.pitch
+            sound.Parent = workspace
+            sound:Play()
+            
+            spawn(function()
+                wait(1)
+                if sound and sound.Parent then
+                    sound:Destroy()
+                end
+            end)
+        end)
+    end
+end
+
+-- Get model distance
+local function getPlayerDistance(model)
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then
         return math.huge
     end
     
+    local modelPosition
+    if model:IsA("Model") then
+        local cf, size = model:GetBoundingBox()
+        modelPosition = cf.Position
+    else
+        modelPosition = model.Position
+    end
+    
     local playerPosition = character.HumanoidRootPart.Position
-    return (position - playerPosition).Magnitude
+    return (modelPosition - playerPosition).Magnitude
 end
 
--- Get model center position more accurately
-local function getModelCenterPosition(model)
-    local cf, size = model:GetBoundingBox()
-    return cf.Position
+-- Get model color
+local function getModelColor(modelName)
+    return modelColors[modelName:lower()] or Color3.fromRGB(255, 255, 0)
 end
 
--- Enhanced ESP label creation with fixed size and color coding
-local function createESPLabel(model, config)
+-- FIXED ESP label creation with color coding and anchored size
+local function createESPLabel(model, modelName)
     if model:FindFirstChild("ESPLabel") then
         return model:FindFirstChild("ESPLabel")
     end
@@ -201,18 +284,17 @@ local function createESPLabel(model, config)
     local billboardGui = Instance.new("BillboardGui")
     billboardGui.Name = "ESPLabel"
     billboardGui.Parent = model
-    billboardGui.Size = ESP_LABEL_SIZE -- Fixed size
+    billboardGui.Size = UDim2.new(0, 150, 0, 50) -- Fixed anchored size
     billboardGui.StudsOffset = Vector3.new(0, 3, 0)
     billboardGui.AlwaysOnTop = true
     billboardGui.LightInfluence = 0
-    billboardGui.MaxDistance = MAX_ESP_DISTANCE -- Built-in distance limiting
     
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Parent = billboardGui
-    nameLabel.Size = UDim2.new(1, 0, 1, 0)
+    nameLabel.Size = UDim2.new(1, 0, 0.7, 0)
     nameLabel.BackgroundTransparency = 1
-    nameLabel.Text = config.name
-    nameLabel.TextColor3 = config.color -- Use configured color
+    nameLabel.Text = modelName
+    nameLabel.TextColor3 = getModelColor(modelName) -- Apply color coding
     nameLabel.TextStrokeTransparency = 0
     nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     nameLabel.TextScaled = true
@@ -222,11 +304,11 @@ local function createESPLabel(model, config)
     local distLabel = Instance.new("TextLabel")
     distLabel.Name = "DistanceLabel"
     distLabel.Parent = billboardGui
-    distLabel.Size = UDim2.new(1, 0, 0.4, 0)
-    distLabel.Position = UDim2.new(0, 0, 0.6, 0)
+    distLabel.Size = UDim2.new(1, 0, 0.3, 0)
+    distLabel.Position = UDim2.new(0, 0, 0.7, 0)
     distLabel.BackgroundTransparency = 1
-    distLabel.Text = "0 studs"
-    distLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    distLabel.Text = "0m"
+    distLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
     distLabel.TextStrokeTransparency = 0
     distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     distLabel.TextScaled = true
@@ -235,8 +317,8 @@ local function createESPLabel(model, config)
     return billboardGui
 end
 
--- Enhanced ESP line creation
-local function createESPLine(model, config)
+-- FIXED ESP line creation with color coding
+local function createESPLine(model, modelName)
     if model:FindFirstChild("ESPLine") then
         return model:FindFirstChild("ESPLine")
     end
@@ -253,87 +335,105 @@ local function createESPLine(model, config)
     beam.Parent = model
     beam.Attachment0 = attachment0
     beam.Attachment1 = attachment1
-    beam.Color = ColorSequence.new(config.color) -- Use configured color
-    beam.Width0 = 0.3
-    beam.Width1 = 0.3
-    beam.Transparency = NumberSequence.new(0.4)
+    beam.Color = ColorSequence.new(getModelColor(modelName)) -- Apply color coding
+    beam.Width0 = 0.2
+    beam.Width1 = 0.2
+    beam.Transparency = NumberSequence.new(0.3)
     beam.FaceCamera = true
     
     return beam, attachment0
 end
 
--- Improved model detection with fuzzy matching
+-- Toggle ESP function
+local function toggleESP()
+    espEnabled = not espEnabled
+    
+    if espEnabled then
+        espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+        espToggle.Text = "ESP: ON"
+        
+        for model, modelName in pairs(foundModels) do
+            if model.Parent then
+                local distance = getPlayerDistance(model)
+                if distance <= MAX_ESP_DISTANCE then
+                    if model:FindFirstChild("ESPLabel") then
+                        model.ESPLabel.Enabled = true
+                    end
+                    if model:FindFirstChild("ESPLine") then
+                        model.ESPLine.Enabled = true
+                    end
+                end
+            end
+        end
+    else
+        espToggle.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+        espToggle.Text = "ESP: OFF"
+        
+        for model, modelName in pairs(foundModels) do
+            if model.Parent then
+                if model:FindFirstChild("ESPLabel") then
+                    model.ESPLabel.Enabled = false
+                end
+                if model:FindFirstChild("ESPLine") then
+                    model.ESPLine.Enabled = false
+                end
+            end
+        end
+    end
+end
+
+espToggle.MouseButton1Click:Connect(toggleESP)
+
+-- FIXED model detection function (restored original logic)
 local function isTargetModel(objName)
     local lowerName = objName:lower()
-    
-    -- Direct match first
-    if targetModels[lowerName] then
-        return targetModels[lowerName]
-    end
-    
-    -- Fuzzy matching for partial names
-    for targetName, config in pairs(targetModels) do
-        -- Check if any significant part of the target name is in the object name
-        local targetWords = {}
-        for word in targetName:gmatch("%S+") do
-            if #word > 2 then -- Only consider words longer than 2 characters
-                table.insert(targetWords, word)
-            end
-        end
-        
-        local matchCount = 0
-        for _, word in pairs(targetWords) do
-            if string.find(lowerName, word) then
-                matchCount = matchCount + 1
-            end
-        end
-        
-        -- If at least 60% of words match, consider it a match
-        if matchCount / #targetWords >= 0.6 then
-            return config
+    for targetName, originalName in pairs(targetModels) do
+        if string.find(lowerName, targetName) then
+            return originalName
         end
     end
-    
     return nil
 end
 
--- Enhanced model scanning with distance checking
+-- Enhanced scan function with distance checking
 local function scanForModels()
     local currentTime = tick()
-    if currentTime - lastScanTime < SCAN_INTERVAL then return end
+    if currentTime - lastScanTime < SCAN_INTERVAL then
+        return
+    end
     lastScanTime = currentTime
     
     local function searchInContainer(container, depth)
-        if depth > 4 then return end
+        if depth > 5 then return end
         
         for _, obj in pairs(container:GetChildren()) do
-            if processedObjects[obj] then continue end
+            if processedObjects[obj] then
+                continue
+            end
             
             if obj:IsA("Model") or obj:IsA("Part") or obj:IsA("MeshPart") then
-                local config = isTargetModel(obj.Name)
+                local targetModelName = isTargetModel(obj.Name)
                 
-                -- Check PrimaryPart for models
-                if not config and obj:IsA("Model") and obj.PrimaryPart then
-                    config = isTargetModel(obj.PrimaryPart.Name)
+                if not targetModelName and obj:IsA("Model") and obj.PrimaryPart then
+                    targetModelName = isTargetModel(obj.PrimaryPart.Name)
                 end
                 
-                if config and not foundModels[obj] then
-                    -- Check distance before adding
-                    local modelPosition = getModelCenterPosition(obj)
-                    local distance = getPlayerDistance(modelPosition)
+                if targetModelName and not foundModels[obj] then
+                    -- Check distance
+                    local distance = getPlayerDistance(obj)
                     
                     if distance <= MAX_ESP_DISTANCE then
-                        foundModels[obj] = {config = config, distance = distance}
+                        foundModels[obj] = targetModelName
                         
                         if espEnabled then
-                            createESPLabel(obj, config)
-                            local beam, playerAttachment = createESPLine(obj, config)
+                            createESPLabel(obj, targetModelName)
+                            local beam, playerAttachment = createESPLine(obj, targetModelName)
                             if playerAttachment then
                                 table.insert(playerAttachments, playerAttachment)
                             end
                         else
-                            local label = createESPLabel(obj, config)
-                            local beam, playerAttachment = createESPLine(obj, config)
+                            local label = createESPLabel(obj, targetModelName)
+                            local beam, playerAttachment = createESPLine(obj, targetModelName)
                             if playerAttachment then
                                 table.insert(playerAttachments, playerAttachment)
                             end
@@ -342,7 +442,7 @@ local function scanForModels()
                         end
                         
                         playNotificationSound()
-                        createToast("Found: " .. config.name .. " (" .. math.floor(distance) .. " studs)", Color3.fromRGB(0, 150, 0))
+                        createToast("Found: " .. targetModelName)
                     end
                     
                     processedObjects[obj] = true
@@ -357,7 +457,7 @@ local function scanForModels()
     
     searchInContainer(workspace, 0)
     
-    -- Update count display
+    -- Update count
     local count = 0
     for _ in pairs(foundModels) do
         count = count + 1
@@ -365,20 +465,17 @@ local function scanForModels()
     countLabel.Text = "Models Found: " .. count
 end
 
--- Enhanced distance update system
+-- Update distances and visibility
 local function updateDistances()
-    for model, data in pairs(foundModels) do
+    for model, modelName in pairs(foundModels) do
         if model.Parent then
-            local modelPosition = getModelCenterPosition(model)
-            local distance = getPlayerDistance(modelPosition)
-            data.distance = distance
+            local distance = getPlayerDistance(model)
             
-            -- Update distance label if ESP is active
-            if espEnabled and model:FindFirstChild("ESPLabel") and model.ESPLabel:FindFirstChild("DistanceLabel") then
-                model.ESPLabel.DistanceLabel.Text = math.floor(distance) .. " studs"
+            if model:FindFirstChild("ESPLabel") and model.ESPLabel:FindFirstChild("DistanceLabel") then
+                model.ESPLabel.DistanceLabel.Text = math.floor(distance) .. "m"
                 
-                -- Hide if too far
-                local shouldShow = distance <= MAX_ESP_DISTANCE
+                -- Show/hide based on distance
+                local shouldShow = distance <= MAX_ESP_DISTANCE and espEnabled
                 model.ESPLabel.Enabled = shouldShow
                 if model:FindFirstChild("ESPLine") then
                     model.ESPLine.Enabled = shouldShow
@@ -388,17 +485,17 @@ local function updateDistances()
     end
 end
 
--- Enhanced cleanup function
+-- Cleanup function
 local function cleanupRemovedModels()
     local toRemove = {}
     
-    for model, data in pairs(foundModels) do
-        if not model.Parent or data.distance > MAX_ESP_DISTANCE then
-            toRemove[model] = data
+    for model, modelName in pairs(foundModels) do
+        if not model.Parent then
+            toRemove[model] = modelName
         end
     end
     
-    for model, data in pairs(toRemove) do
+    for model, modelName in pairs(toRemove) do
         foundModels[model] = nil
         processedObjects[model] = nil
         
@@ -414,45 +511,7 @@ local function cleanupRemovedModels()
     end
 end
 
--- Toggle ESP function
-local function toggleESP()
-    espEnabled = not espEnabled
-    
-    if espEnabled then
-        espToggle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-        espToggle.Text = "ESP: ON"
-        
-        for model, data in pairs(foundModels) do
-            if model.Parent and data.distance <= MAX_ESP_DISTANCE then
-                if model:FindFirstChild("ESPLabel") then
-                    model.ESPLabel.Enabled = true
-                end
-                if model:FindFirstChild("ESPLine") then
-                    model.ESPLine.Enabled = true
-                end
-            end
-        end
-    else
-        espToggle.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-        espToggle.Text = "ESP: OFF"
-        
-        for model, data in pairs(foundModels) do
-            if model.Parent then
-                if model:FindFirstChild("ESPLabel") then
-                    model.ESPLabel.Enabled = false
-                end
-                if model:FindFirstChild("ESPLine") then
-                    model.ESPLine.Enabled = false
-                end
-            end
-        end
-    end
-end
-
--- Connect toggle button
-espToggle.MouseButton1Click:Connect(toggleESP)
-
--- Enhanced player attachment update
+-- Update ESP lines
 local function updateESPLines()
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then
@@ -467,7 +526,6 @@ local function updateESPLines()
         end
     end
     
-    -- Clean invalid attachments
     local validAttachments = {}
     for _, attachment in pairs(playerAttachments) do
         if attachment and attachment.Parent then
@@ -477,9 +535,10 @@ local function updateESPLines()
     playerAttachments = validAttachments
 end
 
--- Player events
+-- FIXED Player events (restored original working code)
 Players.PlayerAdded:Connect(function(player)
-    createToast("@" .. player.Name .. " joined the server", Color3.fromRGB(0, 100, 200))
+    createToast("@" .. player.Name .. " se unió al servidor")
+    playPlayerJoinSound()
 end)
 
 LocalPlayer.CharacterAdded:Connect(function(character)
@@ -487,25 +546,23 @@ LocalPlayer.CharacterAdded:Connect(function(character)
     updateESPLines()
 end)
 
--- Workspace events for better detection
+-- Event connections
 workspace.ChildAdded:Connect(function(child)
-    wait(0.2)
-    processedObjects[child] = nil -- Allow reprocessing of new objects
+    wait(0.1)
     scanForModels()
 end)
 
 workspace.DescendantAdded:Connect(function(descendant)
     if descendant:IsA("Model") or descendant:IsA("Part") or descendant:IsA("MeshPart") then
-        wait(0.2)
-        processedObjects[descendant] = nil
+        wait(0.1)
         scanForModels()
     end
 end)
 
--- Main update loops
+-- Main loops
 spawn(function()
     while true do
-        wait(2)
+        wait(1)
         updateDistances()
     end
 end)
@@ -524,7 +581,7 @@ spawn(function()
     end
 end)
 
--- Make panel draggable
+-- Make draggable
 local dragging = false
 local dragStart = nil
 local startPos = nil
@@ -553,4 +610,4 @@ end)
 -- Initial scan
 scanForModels()
 
-print("Enhanced ESP Panel loaded - Improved detection with 36 studs max distance and color coding!")
+print("Fixed ESP Panel loaded - Working sounds, ESP detection, 36 studs max, and color coding!")
