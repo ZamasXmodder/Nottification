@@ -36,7 +36,6 @@ local notificationsEnabled = false
 local espLines = {}
 local trackedModels = {}
 local trackedPlayers = {}
-local lastPlayerCount = #Players:GetPlayers()
 
 -- Crear GUI principal
 local screenGui = Instance.new("ScreenGui")
@@ -106,14 +105,13 @@ local notifCorner = Instance.new("UICorner")
 notifCorner.CornerRadius = UDim.new(0, 5)
 notifCorner.Parent = notifButton
 
--- Crear múltiples sonidos de notificación (por si uno no funciona)
+-- Crear sonidos de notificación
 local notificationSounds = {}
 local soundIds = {
-    "rbxassetid://131961136", -- Sonido de notificación clásico
-    "rbxassetid://2865227271", -- Sonido de ping
-    "rbxassetid://156785206", -- Sonido de alerta
-    "rbxassetid://2767090", -- Sonido de campana
-    "rbxassetid://131961136" -- Backup
+    "rbxassetid://131961136",
+    "rbxassetid://2865227271",
+    "rbxassetid://156785206",
+    "rbxassetid://2767090"
 }
 
 for i, soundId in pairs(soundIds) do
@@ -136,7 +134,7 @@ local function playNotificationSound()
     print("🔊 Sonido de notificación reproducido!")
 end
 
--- Función para crear líneas ESP
+-- Función para crear líneas ESP más delgadas
 local function createESPLine(targetObject, targetName)
     local character = player.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
@@ -159,7 +157,7 @@ local function createESPLine(targetObject, targetName)
         return
     end
     
-    -- Crear línea usando Beam
+    -- Crear línea usando Beam MÁS DELGADA
     local attachment0 = Instance.new("Attachment")
     local attachment1 = Instance.new("Attachment")
     
@@ -169,7 +167,7 @@ local function createESPLine(targetObject, targetName)
     targetPart.Anchored = true
     targetPart.CanCollide = false
     targetPart.Transparency = 1
-    targetPart.Size = Vector3.new(1, 1, 1)
+    targetPart.Size = Vector3.new(0.1, 0.1, 0.1)
     targetPart.Position = targetPosition
     targetPart.Parent = workspace
     
@@ -178,10 +176,10 @@ local function createESPLine(targetObject, targetName)
     local beam = Instance.new("Beam")
     beam.Attachment0 = attachment0
     beam.Attachment1 = attachment1
-    beam.Color = ColorSequence.new(Color3.fromRGB(255, 0, 255))
-    beam.Width0 = 1
-    beam.Width1 = 1
-    beam.Transparency = NumberSequence.new(0.1)
+    beam.Color = ColorSequence.new(Color3.fromRGB(255, 0, 255)) -- Magenta brillante
+    beam.Width0 = 0.1 -- MUY delgada
+    beam.Width1 = 0.1 -- MUY delgada
+    beam.Transparency = NumberSequence.new(0.3) -- Un poco transparente
     beam.FaceCamera = true
     beam.Parent = workspace
     
@@ -198,7 +196,7 @@ local function createESPLine(targetObject, targetName)
     table.insert(espLines, espData)
     trackedModels[objectId] = espData
     
-    print("✅ ESP creado para:", targetName, "en posición:", targetPosition)
+    print("✅ ESP creado para:", targetName, "en Plot")
     return espData
 end
 
@@ -221,46 +219,58 @@ local function cleanupExpiredESP()
     end
 end
 
--- Función mejorada para buscar modelos
-local function findTargetModels()
+-- Función DIRECTA para buscar en carpetas Plots
+local function findTargetModelsInPlots()
     local foundModels = {}
     
-    local function searchInContainer(container, depth)
-        if depth > 8 then return end
-        
+    -- Buscar todas las carpetas llamadas "Plots" en workspace
+    local function findPlotsFolder(container)
         for _, obj in pairs(container:GetChildren()) do
-            for _, targetName in pairs(targetModels) do
-                local objName = string.lower(obj.Name)
-                local searchName = string.lower(targetName)
+            if obj.Name == "Plots" and obj:IsA("Folder") then
+                print("📁 Encontrada carpeta Plots en:", container.Name)
                 
-                -- Búsqueda más precisa
-                if objName == searchName or 
-                   string.find(objName, searchName, 1, true) or 
-                   string.find(searchName, objName, 1, true) then
+                -- Buscar en cada plot
+                for _, plot in pairs(obj:GetChildren()) do
+                    print("🔍 Buscando en plot:", plot.Name)
                     
-                    if (obj:IsA("Model") or obj:IsA("BasePart")) and not trackedModels[tostring(obj)] then
-                        table.insert(foundModels, {object = obj, name = obj.Name})
-                        print("🎯 Modelo encontrado:", obj.Name, "en", obj.Parent.Name)
+                    -- Buscar recursivamente en el plot
+                    local function searchInPlot(plotContainer, depth)
+                        if depth > 10 then return end
+                        
+                        for _, item in pairs(plotContainer:GetChildren()) do
+                            -- Verificar si es uno de nuestros brainrots objetivo
+                            for _, targetName in pairs(targetModels) do
+                                local itemName = string.lower(item.Name)
+                                local searchName = string.lower(targetName)
+                                
+                                if itemName == searchName or 
+                                   string.find(itemName, searchName, 1, true) or 
+                                   string.find(searchName, itemName, 1, true) then
+                                    
+                                    if (item:IsA("Model") or item:IsA("BasePart")) and not trackedModels[tostring(item)] then
+                                        table.insert(foundModels, {object = item, name = item.Name})
+                                        print("🎯 BRAINROT ENCONTRADO:", item.Name, "en plot:", plot.Name)
+                                    end
+                                end
+                            end
+                            
+                            -- Buscar recursivamente en subcarpetas
+                            if item:IsA("Folder") or item:IsA("Model") then
+                                searchInPlot(item, depth + 1)
+                            end
+                        end
                     end
+                    
+                    searchInPlot(plot, 0)
                 end
-            end
-            
-            if obj:IsA("Folder") or obj:IsA("Model") then
-                searchInContainer(obj, depth + 1)
+            elseif obj:IsA("Folder") then
+                -- Buscar carpetas Plots dentro de otras carpetas
+                findPlotsFolder(obj)
             end
         end
     end
     
-    searchInContainer(workspace, 0)
-    
-    for _, otherPlayer in pairs(Players:GetPlayers()) do
-        if otherPlayer.Character then
-            searchInContainer(otherPlayer.Character, 0)
-        end
-        if otherPlayer.Backpack then
-            searchInContainer(otherPlayer.Backpack, 0)
-        end
-    end
+    findPlotsFolder(workspace)
     
     return foundModels
 end
@@ -288,7 +298,7 @@ local function showNotificationToast(playerName, models)
     toastText.Size = UDim2.new(1, -20, 1, -20)
     toastText.Position = UDim2.new(0, 10, 0, 10)
     toastText.BackgroundTransparency = 1
-    toastText.Text = "🚨 " .. playerName .. " se unió!\n🎯 Modelos: " .. modelsText
+    toastText.Text = "🚨 " .. playerName .. " se unió!\n🎯 Brainrots: " .. modelsText
     toastText.TextColor3 = Color3.fromRGB(255, 255, 255)
     toastText.TextScaled = true
     toastText.Font = Enum.Font.Gotham
@@ -347,7 +357,7 @@ espButton.MouseButton1Click:Connect(function()
     if espEnabled then
         espButton.Text = "ESP: ON"
         espButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
-        print("🔍 ESP activado - Buscando brainrots...")
+                    print("🔍 ESP activado - Buscando brainrots en carpetas Plots...")
     else
         espButton.Text = "ESP: OFF"
         espButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
@@ -359,7 +369,7 @@ espButton.MouseButton1Click:Connect(function()
         end
         espLines = {}
         trackedModels = {}
-                    print("❌ ESP desactivado - Líneas limpiadas")
+        print("❌ ESP desactivado - Líneas limpiadas")
     end
 end)
 
@@ -399,9 +409,9 @@ Players.PlayerAdded:Connect(function(newPlayer)
     trackedPlayers[newPlayer.UserId] = true
 end)
 
--- Loop principal optimizado
+-- Loop principal optimizado para buscar SOLO en carpetas Plots
 local lastScanTime = 0
-local scanInterval = 2 -- Escanear cada 2 segundos para evitar lag
+local scanInterval = 3 -- Escanear cada 3 segundos
 
 RunService.Heartbeat:Connect(function()
     local currentTime = tick()
@@ -410,36 +420,56 @@ RunService.Heartbeat:Connect(function()
     if espEnabled then
         cleanupExpiredESP()
         
-        -- Escanear modelos cada cierto intervalo
+        -- Escanear modelos en Plots cada cierto intervalo
         if currentTime - lastScanTime >= scanInterval then
             lastScanTime = currentTime
             
-            local foundModels = findTargetModels()
+            print("📡 Escaneando carpetas Plots...")
+            local foundModels = findTargetModelsInPlots()
+            
             for _, modelData in pairs(foundModels) do
                 createESPLine(modelData.object, modelData.name)
             end
             
             if #foundModels > 0 then
-                print("📡 Escaneando... Encontrados:", #foundModels, "modelos")
+                print("🎯 Brainrots encontrados en Plots:", #foundModels)
+            else
+                print("❌ No se encontraron brainrots en las carpetas Plots")
             end
         end
     end
     
-    -- Verificar nuevos jugadores (método alternativo)
+    -- Verificar nuevos jugadores
     if notificationsEnabled then
         checkForNewPlayers()
     end
 end)
 
--- Función de prueba para el sonido (opcional)
+-- Función de prueba para el sonido
 local function testSound()
     print("🧪 Probando sonido...")
     playNotificationSound()
 end
 
--- Comando de prueba (puedes escribir esto en la consola)
+-- Función de prueba para buscar plots
+local function testPlotSearch()
+    print("🧪 Probando búsqueda en Plots...")
+    local found = findTargetModelsInPlots()
+    print("Resultados:", #found, "modelos encontrados")
+    for _, model in pairs(found) do
+        print("- " .. model.name)
+    end
+end
+
+-- Comandos de prueba
 _G.testESPSound = testSound
+_G.testPlotSearch = testPlotSearch
 
 print("🚀 ESP Panel cargado exitosamente!")
-print("💡 Tip: Escribe '_G.testESPSound()' en la consola para probar el sonido")
-print("🎯 Buscando estos brainrots:", table.concat(targetModels, ", "))
+print("💡 Tips:")
+print("   - Escribe '_G.testESPSound()' para probar el sonido")
+print("   - Escribe '_G.testPlotSearch()' para probar la búsqueda en Plots")
+print("🎯 Buscando estos brainrots en carpetas Plots:")
+for i, name in pairs(targetModels) do
+    print("   " .. i .. ". " .. name)
+end
