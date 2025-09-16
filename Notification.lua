@@ -36,8 +36,8 @@ local notificationsEnabled = false
 local espLines = {}
 local trackedPlayers = {}
 
--- Sistema de memoria para objetos específicos detectados
-local detectedObjects = {} -- Almacena referencias específicas a objetos ya detectados
+-- Sistema de memoria para brainrots detectados
+local detectedBrainrots = {} -- Almacena objetos que ya fueron detectados
 local memoryCleanupTime = 0
 
 -- Variables para el efecto rainbow
@@ -150,62 +150,59 @@ local function getRainbowColor(hue)
     return Color3.fromHSV(hue, 1, 1)
 end
 
--- Función para verificar si un objeto específico ya fue detectado
-local function wasThisSpecificObjectDetected(targetObject)
-    local objectString = tostring(targetObject)
+-- Función para generar ID único de objeto para el sistema de memoria
+local function getObjectMemoryId(targetObject)
+    if targetObject:IsA("Model") then
+        local primaryPart = targetObject.PrimaryPart or targetObject:FindFirstChildOfClass("BasePart")
+        if primaryPart then
+            return tostring(targetObject.Name) .. "_" .. tostring(primaryPart.Position)
+        end
+    elseif targetObject:IsA("BasePart") then
+        return tostring(targetObject.Name) .. "_" .. tostring(targetObject.Position)
+    end
+    return tostring(targetObject)
+end
+
+-- Función para verificar si un objeto ya fue detectado recientemente
+local function wasRecentlyDetected(targetObject)
+    local memoryId = getObjectMemoryId(targetObject)
+    local currentTime = tick()
     
-    if detectedObjects[objectString] then
-        local currentTime = tick()
-        -- Si han pasado más de 25 segundos, remover de memoria y permitir nueva detección
-        if currentTime - detectedObjects[objectString].timestamp > 25 then
-            detectedObjects[objectString] = nil
-            print("⏰ Objeto removido de memoria después de 25s:", targetObject.Name)
+    if detectedBrainrots[memoryId] then
+        -- Si ha pasado más de 25 segundos desde la detección, permitir nueva detección
+        if currentTime - detectedBrainrots[memoryId].timestamp > 25 then
+            detectedBrainrots[memoryId] = nil
             return false
         end
-        print("🔄 Este objeto específico ya fue detectado recientemente:", targetObject.Name)
         return true
     end
-    
     return false
 end
 
--- Función para marcar objeto específico como detectado
-local function markSpecificObjectAsDetected(targetObject)
-    local objectString = tostring(targetObject)
-    detectedObjects[objectString] = {
+-- Función para marcar objeto como detectado en memoria
+local function markAsDetected(targetObject)
+    local memoryId = getObjectMemoryId(targetObject)
+    detectedBrainrots[memoryId] = {
         timestamp = tick(),
-        name = targetObject.Name,
-        objectRef = targetObject
+        name = targetObject.Name
     }
-    print("🎯 Objeto específico marcado como detectado:", targetObject.Name)
+    print("🧠 Marcado en memoria:", targetObject.Name, "ID:", memoryId)
 end
 
--- Función para limpiar objetos de memoria que ya no existen o expiraron
-local function cleanupObjectMemory()
+-- Función para limpiar memoria de objetos antiguos
+local function cleanupMemory()
     local currentTime = tick()
     local cleanedCount = 0
     
-    for objectString, data in pairs(detectedObjects) do
-        local shouldRemove = false
-        
-        -- Remover si ha expirado (más de 25 segundos)
-        if currentTime - data.timestamp > 25 then
-            shouldRemove = true
-        end
-        
-        -- Remover si el objeto ya no existe
-        if not shouldRemove and not isObjectValid(data.objectRef) then
-            shouldRemove = true
-        end
-        
-        if shouldRemove then
-            detectedObjects[objectString] = nil
+    for memoryId, data in pairs(detectedBrainrots) do
+        if currentTime - data.timestamp > 30 then -- 5 segundos extra de gracia
+            detectedBrainrots[memoryId] = nil
             cleanedCount = cleanedCount + 1
         end
     end
     
     if cleanedCount > 0 then
-        print("🧹 Memoria de objetos limpiada:", cleanedCount, "objetos removidos/expirados")
+        print("🧹 Memoria limpiada:", cleanedCount, "objetos removidos")
     end
 end
 
@@ -220,9 +217,10 @@ local function createESPLine(targetObject, targetName)
         return
     end
     
-    -- Verificar si este objeto específico ya fue detectado recientemente
-    if wasThisSpecificObjectDetected(targetObject) then
-        return -- No crear ESP para este objeto específico que ya fue detectado
+    -- Verificar sistema de memoria
+    if wasRecentlyDetected(targetObject) then
+        print("🧠 Objeto ya detectado recientemente, omitiendo:", targetName)
+        return
     end
     
     local targetPosition
@@ -240,8 +238,8 @@ local function createESPLine(targetObject, targetName)
         return
     end
     
-    -- Marcar este objeto específico como detectado
-    markSpecificObjectAsDetected(targetObject)
+    -- Marcar como detectado en memoria
+    markAsDetected(targetObject)
     
     -- Crear línea usando Beam súper delgada con color rainbow
     local attachment0 = Instance.new("Attachment")
@@ -358,12 +356,12 @@ local function findTargetModelsInPlots()
                                        string.find(searchName, itemName, 1, true) then
                                         
                                         if item:IsA("Model") or item:IsA("BasePart") then
-                                            -- Solo agregar si este objeto específico no fue detectado recientemente
-                                            if not wasThisSpecificObjectDetected(item) then
+                                            -- Solo agregar si no fue detectado recientemente
+                                            if not wasRecentlyDetected(item) then
                                                 table.insert(foundModels, {object = item, name = item.Name})
-                                                print("🎯 NUEVO OBJETO ESPECÍFICO ENCONTRADO:", item.Name, "en plot:", plot.Name)
+                                                print("🎯 NUEVO BRAINROT VÁLIDO ENCONTRADO:", item.Name, "en plot:", plot.Name)
                                             else
-                                                print("⏰ Este objeto específico ya fue detectado hace menos de 25s:", item.Name)
+                                                print("🧠 Brainrot ya detectado, omitiendo:", item.Name)
                                             end
                                         end
                                     end
@@ -407,7 +405,7 @@ local function updateESP()
         end
     end
     
-    print("📊 ESP actualizado:", #foundModels, "nuevos objetos específicos marcados")
+    print("📊 ESP actualizado:", #foundModels, "brainrots nuevos marcados")
 end
 
 -- Función para mostrar toast de notificación
@@ -548,16 +546,16 @@ RunService.Heartbeat:Connect(function()
         updateRainbowColors()
     end
     
-    -- Limpiar memoria de objetos específicos cada 5 segundos
+    -- Limpiar líneas expiradas cada 2 segundos
     if espEnabled and currentTime - lastCleanupTime >= 2 then
         lastCleanupTime = currentTime
         cleanupExpiredESP()
     end
     
-    -- Limpiar memoria de objetos cada 5 segundos
-    if currentTime - lastMemoryCleanup >= 5 then
+    -- Limpiar memoria cada 10 segundos
+    if currentTime - lastMemoryCleanup >= 10 then
         lastMemoryCleanup = currentTime
-        cleanupObjectMemory()
+        cleanupMemory()
     end
 end)
 
@@ -593,25 +591,24 @@ local function cleanupAllESP()
     print("✅ Todo el ESP limpiado")
 end
 
-local function clearObjectMemory()
-    print("🧪 Limpiando memoria de objetos específicos...")
-    detectedObjects = {}
-    print("✅ Memoria de objetos limpiada - todos los objetos pueden ser detectados nuevamente")
+local function clearMemory()
+    print("🧪 Limpiando memoria de brainrots detectados...")
+    detectedBrainrots = {}
+    print("✅ Memoria limpiada - todos los brainrots pueden ser detectados nuevamente")
 end
 
-local function showObjectMemoryStatus()
-    print("🧠 Estado de la memoria de objetos específicos:")
+local function showMemoryStatus()
+    print("🧠 Estado de la memoria:")
     local count = 0
     local currentTime = tick()
-    for objectString, data in pairs(detectedObjects) do
+    for memoryId, data in pairs(detectedBrainrots) do
         local timeLeft = 25 - (currentTime - data.timestamp)
         if timeLeft > 0 then
             count = count + 1
-            print("   - " .. data.name .. " (quedan " .. math.floor(timeLeft) .. "s para re-detección)")
+            print("   - " .. data.name .. " (quedan " .. math.floor(timeLeft) .. "s)")
         end
     end
-    print("Total en memoria:", count, "objetos específicos")
-    print("ℹ️ Los mismos tipos de brainrots PUEDEN ser detectados si son objetos diferentes")
+    print("Total en memoria:", count, "objetos")
 end
 
 -- Comandos de prueba
@@ -619,8 +616,8 @@ _G.testESPSound = testSound
 _G.testPlotSearch = testPlotSearch
 _G.forceUpdateESP = forceUpdateESP
 _G.cleanupAllESP = cleanupAllESP
-_G.clearObjectMemory = clearObjectMemory
-_G.showObjectMemoryStatus = showObjectMemoryStatus
+_G.clearMemory = clearMemory
+_G.showMemoryStatus = showMemoryStatus
 
 print("🚀 ESP Panel Rainbow con Sistema de Memoria cargado exitosamente!")
 print("💡 Tips:")
@@ -628,14 +625,13 @@ print("   - '_G.testESPSound()' para probar el sonido")
 print("   - '_G.testPlotSearch()' para probar la búsqueda")
 print("   - '_G.forceUpdateESP()' para forzar actualización de ESP")
 print("   - '_G.cleanupAllESP()' para limpiar todo el ESP")
-print("   - '_G.clearObjectMemory()' para limpiar la memoria de objetos")
-print("   - '_G.showObjectMemoryStatus()' para ver objetos en memoria")
-print("🌈 Sistema de memoria para objetos específicos:")
-print("   🎯 Cada objeto individual se recuerda por 25 segundos")
-print("   ♻️ Después de 25s, el MISMO objeto puede ser detectado nuevamente")
-print("   🔄 Objetos NUEVOS del mismo tipo SÍ se detectan (diferentes instancias)")
-print("   ⏰ Solo previene re-detección del mismo objeto en 25s")
-print("   🆕 Nuevos jugadores = nuevos objetos = nuevas detecciones")
+print("   - '_G.clearMemory()' para limpiar la memoria")
+print("   - '_G.showMemoryStatus()' para ver el estado de la memoria")
+print("🌈 Características nuevas:")
+print("   ✅ Colores rainbow animados en las líneas ESP")
+print("   🧠 Sistema de memoria que previene re-detección")
+print("   ⏰ Memoria se limpia automáticamente después de 25s")
+print("   🎯 Solo detecta brainrots nuevos o no detectados recientemente")
 print("🎯 Características existentes:")
 print("   ✅ Permite brainrots duplicados (si no están en memoria)")
 print("   ⏰ Líneas ESP expiran en 25 segundos")
