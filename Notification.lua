@@ -133,10 +133,21 @@ local function playNotificationSound()
     print("🔊 Sonido de notificación reproducido!")
 end
 
+-- Función para verificar si un objeto aún existe y es válido
+local function isObjectValid(obj)
+    return obj and obj.Parent and not obj.Parent:IsA("Debris")
+end
+
 -- Función para crear líneas ESP (permite duplicados)
 local function createESPLine(targetObject, targetName)
     local character = player.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    
+    -- Verificar que el objeto aún existe
+    if not isObjectValid(targetObject) then
+        print("❌ Objeto no válido:", targetName)
+        return
+    end
     
     local targetPosition
     if targetObject:IsA("Model") then
@@ -179,7 +190,7 @@ local function createESPLine(targetObject, targetName)
     beam.FaceCamera = true
     beam.Parent = workspace
     
-    -- Crear ID único para cada línea (permite duplicados)
+    -- Crear ID único para cada línea
     local uniqueId = tostring(targetObject) .. "_" .. tick()
     
     local espData = {
@@ -189,7 +200,8 @@ local function createESPLine(targetObject, targetName)
         targetPart = targetPart,
         timestamp = tick(),
         targetName = targetName,
-        uniqueId = uniqueId
+        uniqueId = uniqueId,
+        targetObject = targetObject -- Referencia al objeto original
     }
     
     table.insert(espLines, espData)
@@ -198,24 +210,39 @@ local function createESPLine(targetObject, targetName)
     return espData
 end
 
--- Función para limpiar líneas ESP expiradas (25 segundos)
+-- Función mejorada para limpiar líneas ESP
 local function cleanupExpiredESP()
     local currentTime = tick()
     for i = #espLines, 1, -1 do
         local espData = espLines[i]
-        if currentTime - espData.timestamp > 25 then -- 25 segundos
+        local shouldRemove = false
+        local reason = ""
+        
+        -- Verificar si expiró por tiempo (25 segundos)
+        if currentTime - espData.timestamp > 25 then
+            shouldRemove = true
+            reason = "expiró después de 25 segundos"
+        end
+        
+        -- Verificar si el objeto original ya no existe
+        if not shouldRemove and not isObjectValid(espData.targetObject) then
+            shouldRemove = true
+            reason = "objeto ya no existe"
+        end
+        
+        if shouldRemove then
             if espData.beam then espData.beam:Destroy() end
             if espData.attachment0 then espData.attachment0:Destroy() end
             if espData.attachment1 then espData.attachment1:Destroy() end
             if espData.targetPart then espData.targetPart:Destroy() end
             
             table.remove(espLines, i)
-            print("⏰ ESP expirado para:", espData.targetName, "después de 25 segundos")
+            print("🗑️ ESP removido para:", espData.targetName, "- Razón:", reason)
         end
     end
 end
 
--- Función para buscar brainrots en carpetas Plots
+-- Función para buscar brainrots en carpetas Plots (solo objetos válidos)
 local function findTargetModelsInPlots()
     local foundModels = {}
     
@@ -229,24 +256,26 @@ local function findTargetModelsInPlots()
                         if depth > 10 then return end
                         
                         for _, item in pairs(plotContainer:GetChildren()) do
-                            for _, targetName in pairs(targetModels) do
-                                local itemName = string.lower(item.Name)
-                                local searchName = string.lower(targetName)
-                                
-                                if itemName == searchName or 
-                                   string.find(itemName, searchName, 1, true) or 
-                                   string.find(searchName, itemName, 1, true) then
+                            -- Verificar que el objeto es válido antes de procesarlo
+                            if isObjectValid(item) then
+                                for _, targetName in pairs(targetModels) do
+                                    local itemName = string.lower(item.Name)
+                                    local searchName = string.lower(targetName)
                                     
-                                    if item:IsA("Model") or item:IsA("BasePart") then
-                                        -- PERMITIR DUPLICADOS - no verificar si ya existe
-                                        table.insert(foundModels, {object = item, name = item.Name})
-                                        print("🎯 BRAINROT ENCONTRADO:", item.Name, "en plot:", plot.Name)
+                                    if itemName == searchName or 
+                                       string.find(itemName, searchName, 1, true) or 
+                                       string.find(searchName, itemName, 1, true) then
+                                        
+                                        if item:IsA("Model") or item:IsA("BasePart") then
+                                            table.insert(foundModels, {object = item, name = item.Name})
+                                            print("🎯 BRAINROT VÁLIDO ENCONTRADO:", item.Name, "en plot:", plot.Name)
+                                        end
                                     end
                                 end
-                            end
-                            
-                            if item:IsA("Folder") or item:IsA("Model") then
-                                searchInPlot(item, depth + 1)
+                                
+                                if item:IsA("Folder") or item:IsA("Model") then
+                                    searchInPlot(item, depth + 1)
+                                end
                             end
                         end
                     end
@@ -267,14 +296,22 @@ end
 local function updateESP()
     if not espEnabled then return end
     
-    print("🔄 Actualizando ESP por cambio de jugadores...")
+    print("🔄 Actualizando ESP...")
+    
+    -- Primero limpiar líneas expiradas y objetos que ya no existen
+    cleanupExpiredESP()
+    
+    -- Luego buscar y marcar solo objetos válidos
     local foundModels = findTargetModelsInPlots()
     
     for _, modelData in pairs(foundModels) do
-        createESPLine(modelData.object, modelData.name)
+        -- Verificar una vez más que el objeto es válido antes de crear ESP
+        if isObjectValid(modelData.object) then
+            createESPLine(modelData.object, modelData.name)
+        end
     end
     
-    print("📊 ESP actualizado:", #foundModels, "brainrots marcados")
+    print("📊 ESP actualizado:", #foundModels, "brainrots válidos marcados")
 end
 
 -- Función para mostrar toast de notificación
@@ -331,7 +368,7 @@ espButton.MouseButton1Click:Connect(function()
     if espEnabled then
         espButton.Text = "ESP: ON"
         espButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
-        print("🔍 ESP activado - Marcando brainrots iniciales...")
+        print("🔍 ESP activado - Marcando brainrots válidos...")
         updateESP() -- Marcar brainrots al activar
     else
         espButton.Text = "ESP: OFF"
@@ -350,8 +387,7 @@ end)
 
 notifButton.MouseButton1Click:Connect(function()
     notificationsEnabled = not notificationsEnabled
-    if
-    notificationsEnabled then
+    if notificationsEnabled then
         notifButton.Text = "Notificaciones: ON"
         notifButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
         print("🔔 Notificaciones activadas")
@@ -384,9 +420,10 @@ Players.PlayerAdded:Connect(function(newPlayer)
     
     trackedPlayers[newPlayer.UserId] = true
     
-    -- Actualizar ESP cuando entra un jugador
+    -- Actualizar ESP cuando entra un jugador (solo objetos válidos)
     if espEnabled then
         print("🔄 Actualizando ESP por jugador que se unió...")
+        wait(1) -- Pequeña pausa para que el jugador se establezca
         updateESP()
     end
 end)
@@ -397,17 +434,18 @@ Players.PlayerRemoving:Connect(function(leavingPlayer)
     
     trackedPlayers[leavingPlayer.UserId] = nil
     
-    -- Actualizar ESP cuando sale un jugador
-    if espEnabled then
-        print("🔄 Actualizando ESP por jugador que se fue...")
-        updateESP()
-    end
+    -- NO actualizar ESP cuando sale un jugador para evitar marcar objetos inexistentes
+    print("ℹ️ No se actualiza ESP cuando sale un jugador (evita objetos fantasma)")
 end)
 
--- Loop principal SOLO para limpiar líneas expiradas (sin lag)
+-- Loop principal SOLO para limpiar líneas expiradas y objetos inválidos
+local lastCleanupTime = 0
 RunService.Heartbeat:Connect(function()
-    -- Solo limpiar líneas expiradas cada cierto tiempo
-    if espEnabled and tick() % 2 < 0.1 then -- Cada 2 segundos aproximadamente
+    local currentTime = tick()
+    
+    -- Limpiar cada 2 segundos
+    if espEnabled and currentTime - lastCleanupTime >= 2 then
+        lastCleanupTime = currentTime
         cleanupExpiredESP()
     end
 end)
@@ -421,9 +459,9 @@ end
 local function testPlotSearch()
     print("🧪 Probando búsqueda en Plots...")
     local found = findTargetModelsInPlots()
-    print("Resultados:", #found, "modelos encontrados")
+    print("Resultados:", #found, "modelos válidos encontrados")
     for _, model in pairs(found) do
-        print("- " .. model.name)
+        print("- " .. model.name, "- Válido:", isObjectValid(model.object))
     end
 end
 
@@ -432,21 +470,37 @@ local function forceUpdateESP()
     updateESP()
 end
 
+local function cleanupAllESP()
+    print("🧪 Limpiando todo el ESP...")
+    for _, espData in pairs(espLines) do
+        if espData.beam then espData.beam:Destroy() end
+        if espData.attachment0 then espData.attachment0:Destroy() end
+        if espData.attachment1 then espData.attachment1:Destroy() end
+        if espData.targetPart then espData.targetPart:Destroy() end
+    end
+    espLines = {}
+    print("✅ Todo el ESP limpiado")
+end
+
 -- Comandos de prueba
 _G.testESPSound = testSound
 _G.testPlotSearch = testPlotSearch
 _G.forceUpdateESP = forceUpdateESP
+_G.cleanupAllESP = cleanupAllESP
 
 print("🚀 ESP Panel cargado exitosamente!")
 print("💡 Tips:")
 print("   - '_G.testESPSound()' para probar el sonido")
 print("   - '_G.testPlotSearch()' para probar la búsqueda")
 print("   - '_G.forceUpdateESP()' para forzar actualización de ESP")
-print("🎯 Características:")
+print("   - '_G.cleanupAllESP()' para limpiar todo el ESP")
+print("🎯 Características mejoradas:")
 print("   ✅ Permite brainrots duplicados")
 print("   ⏰ Líneas ESP expiran en 25 segundos")
-print("   🔄 Solo se actualiza cuando entran/salen jugadores")
+print("   🔄 Solo se actualiza cuando ENTRAN jugadores")
+print("   🗑️ Limpia automáticamente objetos que ya no existen")
 print("   📏 Líneas súper delgadas para mejor rendimiento")
+print("   🚫 No marca objetos fantasma cuando salen jugadores")
 print("🎯 Buscando estos brainrots en carpetas Plots:")
 for i, name in pairs(targetModels) do
     print("   " .. i .. ". " .. name)
