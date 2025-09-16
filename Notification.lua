@@ -114,10 +114,10 @@ notifCorner.Parent = notifButton
 -- Crear sonidos de notificación
 local notificationSounds = {}
 local soundIds = {
-    "rbxassetid://131961136",
-    "rbxassetid://2865227271",
-    "rbxassetid://156785206",
-    "rbxassetid://2767090"
+    "rbxassetid://77665577458181",
+    "rbxassetid://77665577458181",
+    "rbxassetid://77665577458181",
+    "rbxassetid://77665577458181"
 }
 
 for i, soundId in pairs(soundIds) do
