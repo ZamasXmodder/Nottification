@@ -35,7 +35,13 @@ local espEnabled = false
 local notificationsEnabled = false
 local espLines = {}
 local trackedPlayers = {}
-local markedObjects = {} -- MEMORIA de objetos ya marcados
+
+-- Sistema de memoria para brainrots detectados
+local detectedBrainrots = {} -- Almacena objetos que ya fueron detectados
+local memoryCleanupTime = 0
+
+-- Variables para el efecto rainbow
+local rainbowHue = 0
 
 -- Crear GUI principal
 local screenGui = Instance.new("ScreenGui")
@@ -139,19 +145,68 @@ local function isObjectValid(obj)
     return obj and obj.Parent and not obj.Parent:IsA("Debris")
 end
 
--- Función para generar ID único del objeto (para memoria)
-local function getObjectMemoryId(obj)
-    if obj:IsA("Model") then
-        local position = obj.PrimaryPart and obj.PrimaryPart.Position or obj:FindFirstChildOfClass("BasePart").Position
-        return obj.Name .. "_" .. tostring(math.floor(position.X)) .. "_" .. tostring(math.floor(position.Z))
-    elseif obj:IsA("BasePart") then
-        local position = obj.Position
-        return obj.Name .. "_" .. tostring(math.floor(position.X)) .. "_" .. tostring(math.floor(position.Z))
-    end
-    return tostring(obj)
+-- Función para generar color rainbow
+local function getRainbowColor(hue)
+    return Color3.fromHSV(hue, 1, 1)
 end
 
--- Función para crear líneas ESP RAINBOW
+-- Función para generar ID único de objeto para el sistema de memoria
+local function getObjectMemoryId(targetObject)
+    if targetObject:IsA("Model") then
+        local primaryPart = targetObject.PrimaryPart or targetObject:FindFirstChildOfClass("BasePart")
+        if primaryPart then
+            return tostring(targetObject.Name) .. "_" .. tostring(primaryPart.Position)
+        end
+    elseif targetObject:IsA("BasePart") then
+        return tostring(targetObject.Name) .. "_" .. tostring(targetObject.Position)
+    end
+    return tostring(targetObject)
+end
+
+-- Función para verificar si un objeto ya fue detectado recientemente
+local function wasRecentlyDetected(targetObject)
+    local memoryId = getObjectMemoryId(targetObject)
+    local currentTime = tick()
+    
+    if detectedBrainrots[memoryId] then
+        -- Si ha pasado más de 25 segundos desde la detección, permitir nueva detección
+        if currentTime - detectedBrainrots[memoryId].timestamp > 25 then
+            detectedBrainrots[memoryId] = nil
+            return false
+        end
+        return true
+    end
+    return false
+end
+
+-- Función para marcar objeto como detectado en memoria
+local function markAsDetected(targetObject)
+    local memoryId = getObjectMemoryId(targetObject)
+    detectedBrainrots[memoryId] = {
+        timestamp = tick(),
+        name = targetObject.Name
+    }
+    print("🧠 Marcado en memoria:", targetObject.Name, "ID:", memoryId)
+end
+
+-- Función para limpiar memoria de objetos antiguos
+local function cleanupMemory()
+    local currentTime = tick()
+    local cleanedCount = 0
+    
+    for memoryId, data in pairs(detectedBrainrots) do
+        if currentTime - data.timestamp > 30 then -- 5 segundos extra de gracia
+            detectedBrainrots[memoryId] = nil
+            cleanedCount = cleanedCount + 1
+        end
+    end
+    
+    if cleanedCount > 0 then
+        print("🧹 Memoria limpiada:", cleanedCount, "objetos removidos")
+    end
+end
+
+-- Función para crear líneas ESP con color rainbow
 local function createESPLine(targetObject, targetName)
     local character = player.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
@@ -162,10 +217,9 @@ local function createESPLine(targetObject, targetName)
         return
     end
     
-    -- Verificar si ya fue marcado antes (MEMORIA)
-    local memoryId = getObjectMemoryId(targetObject)
-    if markedObjects[memoryId] then
-        print("🧠 Objeto ya fue marcado antes:", targetName, "- Saltando...")
+    -- Verificar sistema de memoria
+    if wasRecentlyDetected(targetObject) then
+        print("🧠 Objeto ya detectado recientemente, omitiendo:", targetName)
         return
     end
     
@@ -184,7 +238,10 @@ local function createESPLine(targetObject, targetName)
         return
     end
     
-    -- Crear línea usando Beam RAINBOW
+    -- Marcar como detectado en memoria
+    markAsDetected(targetObject)
+    
+    -- Crear línea usando Beam súper delgada con color rainbow
     local attachment0 = Instance.new("Attachment")
     local attachment1 = Instance.new("Attachment")
     
@@ -203,8 +260,7 @@ local function createESPLine(targetObject, targetName)
     local beam = Instance.new("Beam")
     beam.Attachment0 = attachment0
     beam.Attachment1 = attachment1
-    -- RAINBOW COLOR - Cambia con el tiempo
-    beam.Color = ColorSequence.new(Color3.fromHSV(0, 1, 1))
+    beam.Color = ColorSequence.new(getRainbowColor(rainbowHue))
     beam.Width0 = 0.1
     beam.Width1 = 0.1
     beam.Transparency = NumberSequence.new(0.3)
@@ -222,28 +278,14 @@ local function createESPLine(targetObject, targetName)
         timestamp = tick(),
         targetName = targetName,
         uniqueId = uniqueId,
-        targetObject = targetObject,
-        memoryId = memoryId -- ID para memoria
+        targetObject = targetObject, -- Referencia al objeto original
+        initialHue = rainbowHue -- Guardar hue inicial para animación individual
     }
     
     table.insert(espLines, espData)
     
-    -- Marcar en memoria que este objeto ya fue marcado
-    markedObjects[memoryId] = tick()
-    
-    print("✅ ESP RAINBOW creado para:", targetName, "Memoria ID:", memoryId)
+    print("🌈 ESP rainbow creado para:", targetName, "ID:", uniqueId)
     return espData
-end
-
--- Función para actualizar colores rainbow
-local function updateRainbowColors()
-    local time = tick() * 2 -- Velocidad del rainbow
-    for _, espData in pairs(espLines) do
-        if espData.beam and espData.beam.Parent then
-            local hue = (time + _) % 6 / 6 -- Diferentes colores para cada línea
-            espData.beam.Color = ColorSequence.new(Color3.fromHSV(hue, 1, 1))
-        end
-    end
 end
 
 -- Función mejorada para limpiar líneas ESP
@@ -274,14 +316,22 @@ local function cleanupExpiredESP()
             
             table.remove(espLines, i)
             print("🗑️ ESP removido para:", espData.targetName, "- Razón:", reason)
-            
-            -- MANTENER en memoria para no volver a marcar
-            print("🧠 Objeto permanece en memoria:", espData.memoryId)
         end
     end
 end
 
--- Función para buscar brainrots en carpetas Plots (respeta memoria)
+-- Función para actualizar colores rainbow de todas las líneas ESP
+local function updateRainbowColors()
+    for _, espData in pairs(espLines) do
+        if espData.beam and isObjectValid(espData.beam) then
+            -- Cada línea tiene su propio offset de color basado en su hue inicial
+            local lineHue = (espData.initialHue + (tick() - espData.timestamp) * 0.5) % 1
+            espData.beam.Color = ColorSequence.new(getRainbowColor(lineHue))
+        end
+    end
+end
+
+-- Función para buscar brainrots en carpetas Plots (solo objetos válidos y no detectados)
 local function findTargetModelsInPlots()
     local foundModels = {}
     
@@ -306,13 +356,12 @@ local function findTargetModelsInPlots()
                                        string.find(searchName, itemName, 1, true) then
                                         
                                         if item:IsA("Model") or item:IsA("BasePart") then
-                                            -- Verificar memoria antes de agregar
-                                            local memoryId = getObjectMemoryId(item)
-                                            if not markedObjects[memoryId] then
+                                            -- Solo agregar si no fue detectado recientemente
+                                            if not wasRecentlyDetected(item) then
                                                 table.insert(foundModels, {object = item, name = item.Name})
-                                                print("🎯 BRAINROT NUEVO ENCONTRADO:", item.Name, "en plot:", plot.Name)
+                                                print("🎯 NUEVO BRAINROT VÁLIDO ENCONTRADO:", item.Name, "en plot:", plot.Name)
                                             else
-                                                print("🧠 BRAINROT YA MARCADO ANTES:", item.Name, "- Saltando...")
+                                                print("🧠 Brainrot ya detectado, omitiendo:", item.Name)
                                             end
                                         end
                                     end
@@ -346,7 +395,7 @@ local function updateESP()
     -- Primero limpiar líneas expiradas y objetos que ya no existen
     cleanupExpiredESP()
     
-    -- Luego buscar y marcar solo objetos válidos que NO estén en memoria
+    -- Luego buscar y marcar solo objetos válidos y nuevos
     local foundModels = findTargetModelsInPlots()
     
     for _, modelData in pairs(foundModels) do
@@ -356,8 +405,7 @@ local function updateESP()
         end
     end
     
-    print("📊 ESP actualizado:", #foundModels, "brainrots NUEVOS marcados")
-    print("🧠 Objetos en memoria:", #markedObjects)
+    print("📊 ESP actualizado:", #foundModels, "brainrots nuevos marcados")
 end
 
 -- Función para mostrar toast de notificación
@@ -414,7 +462,7 @@ espButton.MouseButton1Click:Connect(function()
     if espEnabled then
         espButton.Text = "ESP: ON"
         espButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
-        print("🔍 ESP activado - Marcando brainrots nuevos...")
+        print("🌈 ESP rainbow activado - Marcando brainrots nuevos...")
         updateESP() -- Marcar brainrots al activar
     else
         espButton.Text = "ESP: OFF"
@@ -428,7 +476,6 @@ espButton.MouseButton1Click:Connect(function()
         end
         espLines = {}
         print("❌ ESP desactivado - Líneas limpiadas")
-        print("🧠 Memoria conservada:", #markedObjects, "objetos")
     end
 end)
 
@@ -467,7 +514,7 @@ Players.PlayerAdded:Connect(function(newPlayer)
     
     trackedPlayers[newPlayer.UserId] = true
     
-    -- Actualizar ESP cuando entra un jugador (solo objetos nuevos)
+    -- Actualizar ESP cuando entra un jugador (solo objetos válidos y nuevos)
     if espEnabled then
         print("🔄 Actualizando ESP por jugador que se unió...")
         wait(1) -- Pequeña pausa para que el jugador se establezca
@@ -483,23 +530,32 @@ Players.PlayerRemoving:Connect(function(leavingPlayer)
     
     -- NO actualizar ESP cuando sale un jugador para evitar marcar objetos inexistentes
     print("ℹ️ No se actualiza ESP cuando sale un jugador (evita objetos fantasma)")
-    print("🧠 Memoria conservada para cuando regrese:", #markedObjects, "objetos")
 end)
 
--- Loop principal para limpiar líneas expiradas y actualizar rainbow
+-- Loop principal para efectos rainbow, limpieza y memoria
 local lastCleanupTime = 0
+local lastMemoryCleanup = 0
 RunService.Heartbeat:Connect(function()
     local currentTime = tick()
     
-    -- Actualizar colores rainbow
+    -- Actualizar hue global del rainbow
+    rainbowHue = (rainbowHue + 0.02) % 1
+    
+    -- Actualizar colores rainbow de las líneas ESP
     if espEnabled and #espLines > 0 then
         updateRainbowColors()
     end
     
-    -- Limpiar cada 2 segundos
+    -- Limpiar líneas expiradas cada 2 segundos
     if espEnabled and currentTime - lastCleanupTime >= 2 then
         lastCleanupTime = currentTime
         cleanupExpiredESP()
+    end
+    
+    -- Limpiar memoria cada 10 segundos
+    if currentTime - lastMemoryCleanup >= 10 then
+        lastMemoryCleanup = currentTime
+        cleanupMemory()
     end
 end)
 
@@ -512,7 +568,7 @@ end
 local function testPlotSearch()
     print("🧪 Probando búsqueda en Plots...")
     local found = findTargetModelsInPlots()
-    print("Resultados:", #found, "modelos NUEVOS encontrados")
+    print("Resultados:", #found, "modelos válidos y nuevos encontrados")
     for _, model in pairs(found) do
         print("- " .. model.name, "- Válido:", isObjectValid(model.object))
     end
@@ -533,22 +589,26 @@ local function cleanupAllESP()
     end
     espLines = {}
     print("✅ Todo el ESP limpiado")
-    print("🧠 Memoria conservada:", #markedObjects, "objetos")
 end
 
 local function clearMemory()
-    print("🧪 Limpiando memoria de objetos marcados...")
-    markedObjects = {}
-    print("✅ Memoria limpiada - Todos los objetos pueden ser marcados nuevamente")
+    print("🧪 Limpiando memoria de brainrots detectados...")
+    detectedBrainrots = {}
+    print("✅ Memoria limpiada - todos los brainrots pueden ser detectados nuevamente")
 end
 
 local function showMemoryStatus()
     print("🧠 Estado de la memoria:")
-    print("   - Objetos en memoria:", #markedObjects)
-    print("   - ESP activos:", #espLines)
-    for memoryId, timestamp in pairs(markedObjects) do
-        print("   - " .. memoryId .. " (marcado hace " .. math.floor(tick() - timestamp) .. "s)")
+    local count = 0
+    local currentTime = tick()
+    for memoryId, data in pairs(detectedBrainrots) do
+        local timeLeft = 25 - (currentTime - data.timestamp)
+        if timeLeft > 0 then
+            count = count + 1
+            print("   - " .. data.name .. " (quedan " .. math.floor(timeLeft) .. "s)")
+        end
     end
+    print("Total en memoria:", count, "objetos")
 end
 
 -- Comandos de prueba
@@ -559,24 +619,26 @@ _G.cleanupAllESP = cleanupAllESP
 _G.clearMemory = clearMemory
 _G.showMemoryStatus = showMemoryStatus
 
-print("🚀 ESP Panel RAINBOW con MEMORIA cargado exitosamente!")
+print("🚀 ESP Panel Rainbow con Sistema de Memoria cargado exitosamente!")
 print("💡 Tips:")
 print("   - '_G.testESPSound()' para probar el sonido")
 print("   - '_G.testPlotSearch()' para probar la búsqueda")
 print("   - '_G.forceUpdateESP()' para forzar actualización de ESP")
 print("   - '_G.cleanupAllESP()' para limpiar todo el ESP")
-print("   - '_G.clearMemory()' para limpiar memoria y permitir remarcar")
-print("   - '_G.showMemoryStatus()' para ver estado de la memoria")
-print("🎯 Características MEJORADAS:")
-print("   🌈 Líneas ESP RAINBOW que cambian de color")
-print("   🧠 Sistema de MEMORIA - No remarca objetos ya marcados")
-print("   ✅ Permite brainrots duplicados (si son nuevos)")
+print("   - '_G.clearMemory()' para limpiar la memoria")
+print("   - '_G.showMemoryStatus()' para ver el estado de la memoria")
+print("🌈 Características nuevas:")
+print("   ✅ Colores rainbow animados en las líneas ESP")
+print("   🧠 Sistema de memoria que previene re-detección")
+print("   ⏰ Memoria se limpia automáticamente después de 25s")
+print("   🎯 Solo detecta brainrots nuevos o no detectados recientemente")
+print("🎯 Características existentes:")
+print("   ✅ Permite brainrots duplicados (si no están en memoria)")
 print("   ⏰ Líneas ESP expiran en 25 segundos")
 print("   🔄 Solo se actualiza cuando ENTRAN jugadores")
 print("   🗑️ Limpia automáticamente objetos que ya no existen")
 print("   📏 Líneas súper delgadas para mejor rendimiento")
 print("   🚫 No marca objetos fantasma cuando salen jugadores")
-print("   💾 Memoria persistente - Recuerda objetos marcados")
 print("🎯 Buscando estos brainrots en carpetas Plots:")
 for i, name in pairs(targetModels) do
     print("   " .. i .. ". " .. name)
