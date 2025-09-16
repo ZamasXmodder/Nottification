@@ -36,10 +36,10 @@ local notificationsEnabled = false
 local espLines = {}
 local trackedPlayers = {}
 
--- Sistema de memoria permanente para brainrots detectados
-local permanentMemory = {} -- Almacena objetos que ya fueron detectados (PERMANENTE)
-local temporaryESP = {} -- Almacena ESP activos temporalmente
-local memoryCleanupTime = 0
+-- Sistema de memoria para brainrots detectados (temporal, se resetea con nuevos jugadores)
+local detectedBrainrots = {} -- Almacena objetos que ya fueron detectados en la sesión actual
+local sessionStartTime = tick()
+local lastPlayerJoinTime = 0
 
 -- Variables para el efecto rainbow
 local rainbowHue = 0
@@ -151,57 +151,83 @@ local function getRainbowColor(hue)
     return Color3.fromHSV(hue, 1, 1)
 end
 
--- Función para generar ID único de objeto para el sistema de memoria PERMANENTE
-local function getObjectMemoryId(targetObject)
+-- Función para generar ID único de objeto basado en posición exacta
+local function getObjectUniqueId(targetObject)
     if targetObject:IsA("Model") then
         local primaryPart = targetObject.PrimaryPart or targetObject:FindFirstChildOfClass("BasePart")
         if primaryPart then
-            -- Usar solo el nombre del objeto para memoria permanente (no posición)
-            return tostring(targetObject.Name) .. "_model"
+            -- Usar posición exacta para identificar cada instancia única
+            return tostring(targetObject.Name) .. "_" .. tostring(primaryPart.Position)
         end
     elseif targetObject:IsA("BasePart") then
-        -- Usar solo el nombre del objeto para memoria permanente (no posición)
-        return tostring(targetObject.Name) .. "_part"
+        -- Usar posición exacta para identificar cada instancia única
+        return tostring(targetObject.Name) .. "_" .. tostring(targetObject.Position)
     end
-    return tostring(targetObject.Name) .. "_unknown"
+    return tostring(targetObject) .. "_" .. tick()
 end
 
--- Función para verificar si un objeto ya fue detectado ALGUNA VEZ (memoria permanente)
-local function wasEverDetected(targetObject)
-    local memoryId = getObjectMemoryId(targetObject)
+-- Función para verificar si un objeto específico ya fue detectado en esta sesión
+local function wasAlreadyDetected(targetObject)
+    local uniqueId = getObjectUniqueId(targetObject)
+    local currentTime = tick()
     
-    if permanentMemory[memoryId] then
-        print("🚫 Objeto YA detectado anteriormente (memoria permanente):", targetObject.Name)
+    if detectedBrainrots[uniqueId] then
+        -- Si ha pasado más de 25 segundos desde la detección, permitir nueva detección
+        if currentTime - detectedBrainrots[uniqueId].timestamp > 25 then
+            detectedBrainrots[uniqueId] = nil
+            return false
+        end
         return true
     end
     return false
 end
 
--- Función para marcar objeto como detectado PERMANENTEMENTE
-local function markAsPermanentlyDetected(targetObject)
-    local memoryId = getObjectMemoryId(targetObject)
-    permanentMemory[memoryId] = {
+-- Función para marcar objeto específico como detectado
+local function markAsDetected(targetObject)
+    local uniqueId = getObjectUniqueId(targetObject)
+    detectedBrainrots[uniqueId] = {
         timestamp = tick(),
         name = targetObject.Name,
-        permanent = true
+        position = getObjectUniqueId(targetObject)
     }
-    print("🧠 Marcado PERMANENTEMENTE en memoria:", targetObject.Name, "ID:", memoryId)
+    print("🧠 Marcado en sesión actual:", targetObject.Name, "ID:", uniqueId)
 end
 
--- Función para limpiar solo ESP temporales expirados (NO afecta memoria permanente)
-local function cleanupTemporaryESP()
+-- Función para resetear detecciones cuando entra un nuevo jugador
+local function resetDetectionsForNewPlayer()
+    print("🔄 Nuevo jugador detectado - Permitiendo detección de nuevos brainrots...")
+    -- No limpiar toda la memoria, solo permitir nuevas detecciones
+    lastPlayerJoinTime = tick()
+    
+    -- Limpiar solo las entradas que ya expiraron
     local currentTime = tick()
     local cleanedCount = 0
-    
-    for memoryId, data in pairs(temporaryESP) do
+    for uniqueId, data in pairs(detectedBrainrots) do
         if currentTime - data.timestamp > 25 then
-            temporaryESP[memoryId] = nil
+            detectedBrainrots[uniqueId] = nil
             cleanedCount = cleanedCount + 1
         end
     end
     
     if cleanedCount > 0 then
-        print("🧹 ESP temporales limpiados:", cleanedCount, "líneas expiradas")
+        print("🧹 Limpiadas", cleanedCount, "detecciones expiradas para permitir nuevos brainrots")
+    end
+end
+
+-- Función para limpiar detecciones expiradas automáticamente
+local function cleanupExpiredDetections()
+    local currentTime = tick()
+    local cleanedCount = 0
+    
+    for uniqueId, data in pairs(detectedBrainrots) do
+        if currentTime - data.timestamp > 25 then
+            detectedBrainrots[uniqueId] = nil
+            cleanedCount = cleanedCount + 1
+        end
+    end
+    
+    if cleanedCount > 0 then
+        print("🧹 Detecciones automáticamente limpiadas:", cleanedCount, "objetos expirados")
     end
 end
 
@@ -216,9 +242,9 @@ local function createESPLine(targetObject, targetName)
         return
     end
     
-    -- Verificar sistema de memoria PERMANENTE
-    if wasEverDetected(targetObject) then
-        return -- No crear ESP para objetos ya detectados anteriormente
+    -- Verificar si ya fue detectado en esta sesión (específicamente este objeto)
+    if wasAlreadyDetected(targetObject) then
+        return -- No crear ESP para este objeto específico si ya fue detectado recientemente
     end
     
     local targetPosition
@@ -236,8 +262,8 @@ local function createESPLine(targetObject, targetName)
         return
     end
     
-    -- Marcar como detectado PERMANENTEMENTE
-    markAsPermanentlyDetected(targetObject)
+    -- Marcar este objeto específico como detectado en esta sesión
+    markAsDetected(targetObject)
     
     -- Crear línea usando Beam súper delgada con color rainbow
     local attachment0 = Instance.new("Attachment")
@@ -354,12 +380,12 @@ local function findTargetModelsInPlots()
                                        string.find(searchName, itemName, 1, true) then
                                         
                                         if item:IsA("Model") or item:IsA("BasePart") then
-                                            -- Solo agregar si NUNCA fue detectado antes
-                                            if not wasEverDetected(item) then
+                                            -- Detectar todos los brainrots, incluso duplicados (si son nuevas instancias)
+                                            if not wasAlreadyDetected(item) then
                                                 table.insert(foundModels, {object = item, name = item.Name})
-                                                print("🎯 BRAINROT COMPLETAMENTE NUEVO ENCONTRADO:", item.Name, "en plot:", plot.Name)
+                                                print("🎯 BRAINROT ENCONTRADO (nueva instancia):", item.Name, "en plot:", plot.Name)
                                             else
-                                                print("🚫 Brainrot ya detectado anteriormente, NUNCA más se marcará:", item.Name)
+                                                print("⏰ Brainrot ya detectado recientemente (esperando expiración):", item.Name)
                                             end
                                         end
                                     end
@@ -512,10 +538,11 @@ Players.PlayerAdded:Connect(function(newPlayer)
     
     trackedPlayers[newPlayer.UserId] = true
     
-    -- Actualizar ESP cuando entra un jugador (solo objetos válidos y nuevos)
+    -- Actualizar ESP cuando entra un jugador (detectar nuevos brainrots)
     if espEnabled then
-        print("🔄 Actualizando ESP por jugador que se unió...")
+        print("🔄 Actualizando ESP por jugador que se unió - Buscando nuevos brainrots...")
         wait(1) -- Pequeña pausa para que el jugador se establezca
+        resetDetectionsForNewPlayer() -- Permitir detección de nuevos brainrots
         updateESP()
     end
 end)
@@ -544,11 +571,11 @@ RunService.Heartbeat:Connect(function()
         updateRainbowColors()
     end
     
-    -- Limpiar ESP temporales cada 2 segundos (NO afecta memoria permanente)
+    -- Limpiar detecciones expiradas cada 2 segundos
     if espEnabled and currentTime - lastCleanupTime >= 2 then
         lastCleanupTime = currentTime
         cleanupExpiredESP()
-        cleanupTemporaryESP()
+        cleanupExpiredDetections()
     end
 end)
 
@@ -584,22 +611,26 @@ local function cleanupAllESP()
     print("✅ Todo el ESP limpiado")
 end
 
-local function clearPermanentMemory()
-    print("🧪 Limpiando memoria PERMANENTE de brainrots...")
-    permanentMemory = {}
-    temporaryESP = {}
-    print("✅ Memoria PERMANENTE limpiada - todos los brainrots pueden ser detectados nuevamente")
+local function clearSessionMemory()
+    print("🧪 Limpiando memoria de sesión actual...")
+    detectedBrainrots = {}
+    sessionStartTime = tick()
+    print("✅ Memoria de sesión limpiada - todos los brainrots pueden ser detectados nuevamente")
 end
 
-local function showPermanentMemoryStatus()
-    print("🧠 Estado de la memoria PERMANENTE:")
+local function showSessionMemoryStatus()
+    print("🧠 Estado de la memoria de sesión actual:")
     local count = 0
-    for memoryId, data in pairs(permanentMemory) do
-        count = count + 1
-        local timeAgo = tick() - data.timestamp
-        print("   - " .. data.name .. " (detectado hace " .. math.floor(timeAgo) .. "s) - PERMANENTE")
+    local currentTime = tick()
+    for uniqueId, data in pairs(detectedBrainrots) do
+        local timeLeft = 25 - (currentTime - data.timestamp)
+        if timeLeft > 0 then
+            count = count + 1
+            print("   - " .. data.name .. " (quedan " .. math.floor(timeLeft) .. "s)")
+        end
     end
-    print("Total en memoria permanente:", count, "objetos que NUNCA se volverán a detectar")
+    print("Total en memoria temporal:", count, "objetos")
+    print("Sesión iniciada hace:", math.floor(tick() - sessionStartTime), "segundos")
 end
 
 -- Comandos de prueba
@@ -607,8 +638,8 @@ _G.testESPSound = testSound
 _G.testPlotSearch = testPlotSearch
 _G.forceUpdateESP = forceUpdateESP
 _G.cleanupAllESP = cleanupAllESP
-_G.clearPermanentMemory = clearPermanentMemory
-_G.showPermanentMemoryStatus = showPermanentMemoryStatus
+_G.clearSessionMemory = clearSessionMemory
+_G.showSessionMemoryStatus = showSessionMemoryStatus
 
 print("🚀 ESP Panel Rainbow con Sistema de Memoria cargado exitosamente!")
 print("💡 Tips:")
