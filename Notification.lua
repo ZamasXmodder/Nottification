@@ -36,8 +36,9 @@ local notificationsEnabled = false
 local espLines = {}
 local trackedPlayers = {}
 
--- Sistema de memoria para brainrots detectados
-local detectedBrainrots = {} -- Almacena objetos que ya fueron detectados
+-- Sistema de memoria permanente para brainrots detectados
+local permanentMemory = {} -- Almacena objetos que ya fueron detectados (PERMANENTE)
+local temporaryESP = {} -- Almacena ESP activos temporalmente
 local memoryCleanupTime = 0
 
 -- Variables para el efecto rainbow
@@ -150,59 +151,57 @@ local function getRainbowColor(hue)
     return Color3.fromHSV(hue, 1, 1)
 end
 
--- Función para generar ID único de objeto para el sistema de memoria
+-- Función para generar ID único de objeto para el sistema de memoria PERMANENTE
 local function getObjectMemoryId(targetObject)
     if targetObject:IsA("Model") then
         local primaryPart = targetObject.PrimaryPart or targetObject:FindFirstChildOfClass("BasePart")
         if primaryPart then
-            return tostring(targetObject.Name) .. "_" .. tostring(primaryPart.Position)
+            -- Usar solo el nombre del objeto para memoria permanente (no posición)
+            return tostring(targetObject.Name) .. "_model"
         end
     elseif targetObject:IsA("BasePart") then
-        return tostring(targetObject.Name) .. "_" .. tostring(targetObject.Position)
+        -- Usar solo el nombre del objeto para memoria permanente (no posición)
+        return tostring(targetObject.Name) .. "_part"
     end
-    return tostring(targetObject)
+    return tostring(targetObject.Name) .. "_unknown"
 end
 
--- Función para verificar si un objeto ya fue detectado recientemente
-local function wasRecentlyDetected(targetObject)
+-- Función para verificar si un objeto ya fue detectado ALGUNA VEZ (memoria permanente)
+local function wasEverDetected(targetObject)
     local memoryId = getObjectMemoryId(targetObject)
-    local currentTime = tick()
     
-    if detectedBrainrots[memoryId] then
-        -- Si ha pasado más de 25 segundos desde la detección, permitir nueva detección
-        if currentTime - detectedBrainrots[memoryId].timestamp > 25 then
-            detectedBrainrots[memoryId] = nil
-            return false
-        end
+    if permanentMemory[memoryId] then
+        print("🚫 Objeto YA detectado anteriormente (memoria permanente):", targetObject.Name)
         return true
     end
     return false
 end
 
--- Función para marcar objeto como detectado en memoria
-local function markAsDetected(targetObject)
+-- Función para marcar objeto como detectado PERMANENTEMENTE
+local function markAsPermanentlyDetected(targetObject)
     local memoryId = getObjectMemoryId(targetObject)
-    detectedBrainrots[memoryId] = {
+    permanentMemory[memoryId] = {
         timestamp = tick(),
-        name = targetObject.Name
+        name = targetObject.Name,
+        permanent = true
     }
-    print("🧠 Marcado en memoria:", targetObject.Name, "ID:", memoryId)
+    print("🧠 Marcado PERMANENTEMENTE en memoria:", targetObject.Name, "ID:", memoryId)
 end
 
--- Función para limpiar memoria de objetos antiguos
-local function cleanupMemory()
+-- Función para limpiar solo ESP temporales expirados (NO afecta memoria permanente)
+local function cleanupTemporaryESP()
     local currentTime = tick()
     local cleanedCount = 0
     
-    for memoryId, data in pairs(detectedBrainrots) do
-        if currentTime - data.timestamp > 30 then -- 5 segundos extra de gracia
-            detectedBrainrots[memoryId] = nil
+    for memoryId, data in pairs(temporaryESP) do
+        if currentTime - data.timestamp > 25 then
+            temporaryESP[memoryId] = nil
             cleanedCount = cleanedCount + 1
         end
     end
     
     if cleanedCount > 0 then
-        print("🧹 Memoria limpiada:", cleanedCount, "objetos removidos")
+        print("🧹 ESP temporales limpiados:", cleanedCount, "líneas expiradas")
     end
 end
 
@@ -217,10 +216,9 @@ local function createESPLine(targetObject, targetName)
         return
     end
     
-    -- Verificar sistema de memoria
-    if wasRecentlyDetected(targetObject) then
-        print("🧠 Objeto ya detectado recientemente, omitiendo:", targetName)
-        return
+    -- Verificar sistema de memoria PERMANENTE
+    if wasEverDetected(targetObject) then
+        return -- No crear ESP para objetos ya detectados anteriormente
     end
     
     local targetPosition
@@ -238,8 +236,8 @@ local function createESPLine(targetObject, targetName)
         return
     end
     
-    -- Marcar como detectado en memoria
-    markAsDetected(targetObject)
+    -- Marcar como detectado PERMANENTEMENTE
+    markAsPermanentlyDetected(targetObject)
     
     -- Crear línea usando Beam súper delgada con color rainbow
     local attachment0 = Instance.new("Attachment")
@@ -356,12 +354,12 @@ local function findTargetModelsInPlots()
                                        string.find(searchName, itemName, 1, true) then
                                         
                                         if item:IsA("Model") or item:IsA("BasePart") then
-                                            -- Solo agregar si no fue detectado recientemente
-                                            if not wasRecentlyDetected(item) then
+                                            -- Solo agregar si NUNCA fue detectado antes
+                                            if not wasEverDetected(item) then
                                                 table.insert(foundModels, {object = item, name = item.Name})
-                                                print("🎯 NUEVO BRAINROT VÁLIDO ENCONTRADO:", item.Name, "en plot:", plot.Name)
+                                                print("🎯 BRAINROT COMPLETAMENTE NUEVO ENCONTRADO:", item.Name, "en plot:", plot.Name)
                                             else
-                                                print("🧠 Brainrot ya detectado, omitiendo:", item.Name)
+                                                print("🚫 Brainrot ya detectado anteriormente, NUNCA más se marcará:", item.Name)
                                             end
                                         end
                                     end
@@ -546,16 +544,11 @@ RunService.Heartbeat:Connect(function()
         updateRainbowColors()
     end
     
-    -- Limpiar líneas expiradas cada 2 segundos
+    -- Limpiar ESP temporales cada 2 segundos (NO afecta memoria permanente)
     if espEnabled and currentTime - lastCleanupTime >= 2 then
         lastCleanupTime = currentTime
         cleanupExpiredESP()
-    end
-    
-    -- Limpiar memoria cada 10 segundos
-    if currentTime - lastMemoryCleanup >= 10 then
-        lastMemoryCleanup = currentTime
-        cleanupMemory()
+        cleanupTemporaryESP()
     end
 end)
 
@@ -591,24 +584,22 @@ local function cleanupAllESP()
     print("✅ Todo el ESP limpiado")
 end
 
-local function clearMemory()
-    print("🧪 Limpiando memoria de brainrots detectados...")
-    detectedBrainrots = {}
-    print("✅ Memoria limpiada - todos los brainrots pueden ser detectados nuevamente")
+local function clearPermanentMemory()
+    print("🧪 Limpiando memoria PERMANENTE de brainrots...")
+    permanentMemory = {}
+    temporaryESP = {}
+    print("✅ Memoria PERMANENTE limpiada - todos los brainrots pueden ser detectados nuevamente")
 end
 
-local function showMemoryStatus()
-    print("🧠 Estado de la memoria:")
+local function showPermanentMemoryStatus()
+    print("🧠 Estado de la memoria PERMANENTE:")
     local count = 0
-    local currentTime = tick()
-    for memoryId, data in pairs(detectedBrainrots) do
-        local timeLeft = 25 - (currentTime - data.timestamp)
-        if timeLeft > 0 then
-            count = count + 1
-            print("   - " .. data.name .. " (quedan " .. math.floor(timeLeft) .. "s)")
-        end
+    for memoryId, data in pairs(permanentMemory) do
+        count = count + 1
+        local timeAgo = tick() - data.timestamp
+        print("   - " .. data.name .. " (detectado hace " .. math.floor(timeAgo) .. "s) - PERMANENTE")
     end
-    print("Total en memoria:", count, "objetos")
+    print("Total en memoria permanente:", count, "objetos que NUNCA se volverán a detectar")
 end
 
 -- Comandos de prueba
@@ -616,8 +607,8 @@ _G.testESPSound = testSound
 _G.testPlotSearch = testPlotSearch
 _G.forceUpdateESP = forceUpdateESP
 _G.cleanupAllESP = cleanupAllESP
-_G.clearMemory = clearMemory
-_G.showMemoryStatus = showMemoryStatus
+_G.clearPermanentMemory = clearPermanentMemory
+_G.showPermanentMemoryStatus = showPermanentMemoryStatus
 
 print("🚀 ESP Panel Rainbow con Sistema de Memoria cargado exitosamente!")
 print("💡 Tips:")
@@ -625,13 +616,13 @@ print("   - '_G.testESPSound()' para probar el sonido")
 print("   - '_G.testPlotSearch()' para probar la búsqueda")
 print("   - '_G.forceUpdateESP()' para forzar actualización de ESP")
 print("   - '_G.cleanupAllESP()' para limpiar todo el ESP")
-print("   - '_G.clearMemory()' para limpiar la memoria")
-print("   - '_G.showMemoryStatus()' para ver el estado de la memoria")
-print("🌈 Características nuevas:")
-print("   ✅ Colores rainbow animados en las líneas ESP")
-print("   🧠 Sistema de memoria que previene re-detección")
-print("   ⏰ Memoria se limpia automáticamente después de 25s")
-print("   🎯 Solo detecta brainrots nuevos o no detectados recientemente")
+print("   - '_G.clearPermanentMemory()' para limpiar la memoria PERMANENTE")
+print("   - '_G.showPermanentMemoryStatus()' para ver la memoria permanente")
+print("🌈 Sistema de memoria PERMANENTE:")
+print("   🧠 Una vez detectado un brainrot, NUNCA se volverá a marcar")
+print("   ⏰ Las líneas ESP siguen expirando a los 25s")
+print("   🚫 Solo brainrots completamente nuevos serán detectados")
+print("   🎯 Memoria permanente previene spam visual")
 print("🎯 Características existentes:")
 print("   ✅ Permite brainrots duplicados (si no están en memoria)")
 print("   ⏰ Líneas ESP expiran en 25 segundos")
