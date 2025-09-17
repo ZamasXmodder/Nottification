@@ -9,6 +9,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Modelos objetivo
 local targetModels = {
+    "Tacorita Bicicleta",
     "Chicleteira Bicicleteira",
     "Spaghetti Tualetti", 
     "Esok Sekolah",
