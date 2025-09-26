@@ -9,6 +9,13 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Modelos objetivo
 local targetModels = {
+    "Mariachi Corazoni",
+    "Secret Lucky Block",
+    "To to to Sahur",
+    "Strawberry Elephant",
+    "Ketchuru and Musturu",
+    "La Extinct Grande",
+    "Tictac Sahur",
     "Tacorita Bicicleta",
     "Chicleteira Bicicleteira",
     "Spaghetti Tualetti", 
@@ -332,9 +339,15 @@ local function updateRainbowColors()
     end
 end
 
--- Función para buscar brainrots en carpetas Plots (solo objetos válidos y no detectados)
+-- FUNCIÓN CORREGIDA: Búsqueda con coincidencia EXACTA
 local function findTargetModelsInPlots()
     local foundModels = {}
+    
+    -- Crear un set de nombres objetivo para búsqueda más eficiente
+    local targetSet = {}
+    for _, targetName in pairs(targetModels) do
+        targetSet[targetName] = true
+    end
     
     local function findPlotsFolder(container)
         for _, obj in pairs(container:GetChildren()) do
@@ -348,22 +361,15 @@ local function findTargetModelsInPlots()
                         for _, item in pairs(plotContainer:GetChildren()) do
                             -- Verificar que el objeto es válido antes de procesarlo
                             if isObjectValid(item) then
-                                for _, targetName in pairs(targetModels) do
-                                    local itemName = string.lower(item.Name)
-                                    local searchName = string.lower(targetName)
-                                    
-                                    if itemName == searchName or 
-                                       string.find(itemName, searchName, 1, true) or 
-                                       string.find(searchName, itemName, 1, true) then
-                                        
-                                        if item:IsA("Model") or item:IsA("BasePart") then
-                                            -- Solo agregar si no fue detectado recientemente
-                                            if not wasRecentlyDetected(item) then
-                                                table.insert(foundModels, {object = item, name = item.Name})
-                                                print("🎯 NUEVO BRAINROT VÁLIDO ENCONTRADO:", item.Name, "en plot:", plot.Name)
-                                            else
-                                                print("🧠 Brainrot ya detectado, omitiendo:", item.Name)
-                                            end
+                                -- COINCIDENCIA EXACTA: comparar directamente con el set
+                                if targetSet[item.Name] then
+                                    if item:IsA("Model") or item:IsA("BasePart") then
+                                        -- Solo agregar si no fue detectado recientemente
+                                        if not wasRecentlyDetected(item) then
+                                            table.insert(foundModels, {object = item, name = item.Name})
+                                            print("🎯 BRAINROT ENCONTRADO (COINCIDENCIA EXACTA):", item.Name, "en plot:", plot.Name)
+                                        else
+                                            print("🧠 Brainrot ya detectado, omitiendo:", item.Name)
                                         end
                                     end
                                 end
@@ -633,6 +639,7 @@ print("   ✅ Colores rainbow animados en las líneas ESP")
 print("   🧠 Sistema de memoria que previene re-detección")
 print("   ⏰ Memoria se limpia automáticamente después de 25s")
 print("   🎯 Solo detecta brainrots nuevos o no detectados recientemente")
+print("   🔍 COINCIDENCIA EXACTA - Respeta mayúsculas y minúsculas")
 print("🎯 Características existentes:")
 print("   ✅ Permite brainrots duplicados (si no están en memoria)")
 print("   ⏰ Líneas ESP expiran en 25 segundos")
@@ -640,7 +647,7 @@ print("   🔄 Solo se actualiza cuando ENTRAN jugadores")
 print("   🗑️ Limpia automáticamente objetos que ya no existen")
 print("   📏 Líneas súper delgadas para mejor rendimiento")
 print("   🚫 No marca objetos fantasma cuando salen jugadores")
-print("🎯 Buscando estos brainrots en carpetas Plots:")
+print("🎯 Buscando estos brainrots en carpetas Plots (COINCIDENCIA EXACTA):")
 for i, name in pairs(targetModels) do
     print("   " .. i .. ". " .. name)
 end
