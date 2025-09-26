@@ -21,15 +21,14 @@ local targetModels = {
     "Chicleteira Bicicleteira",
     "Spaghetti Tualetti", 
     "Esok Sekolah",
-    "Los Nooo My Hotspotsitos",
-    "La Grande Combinassion",
+    "La Grande Combinasion",
     "Los Chicleteiras",
     "67",
     "Los Combinasionas",
     "Nuclearo Dinosauro",
     "Las Sis",
     "Los Hotspotsitos",
-    "Tralalalaledon",
+    "Tralaledon",
     "Ketupat Kepat",
     "Los Bros",
     "La Supreme Combinasion",
@@ -52,16 +51,21 @@ local memoryCleanupTime = 0
 -- Variables para el efecto rainbow
 local rainbowHue = 0
 
+-- NUEVA VARIABLE: Control de búsqueda continua
+local continuousSearchEnabled = true
+local lastSearchTime = 0
+local searchInterval = 2 -- Buscar cada 2 segundos cuando ESP está activado
+
 -- Crear GUI principal
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ESPPanel"
 screenGui.Parent = playerGui
 screenGui.ResetOnSpawn = false
 
--- Panel principal
+-- Panel principal - AUMENTAR TAMAÑO PARA NUEVO BOTÓN
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainPanel"
-mainFrame.Size = UDim2.new(0, 200, 0, 120)
+mainFrame.Size = UDim2.new(0, 200, 0, 160) -- Aumentado de 120 a 160
 mainFrame.Position = UDim2.new(1, -210, 0, 10)
 mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 mainFrame.BorderSizePixel = 0
@@ -119,6 +123,22 @@ notifButton.Parent = mainFrame
 local notifCorner = Instance.new("UICorner")
 notifCorner.CornerRadius = UDim.new(0, 5)
 notifCorner.Parent = notifButton
+
+-- NUEVO BOTÓN: Búsqueda Continua
+local continuousButton = Instance.new("TextButton")
+continuousButton.Name = "ContinuousButton"
+continuousButton.Size = UDim2.new(1, -20, 0, 30)
+continuousButton.Position = UDim2.new(0, 10, 0, 120)
+continuousButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+continuousButton.Text = "Búsqueda Continua: ON"
+continuousButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+continuousButton.TextScaled = true
+continuousButton.Font = Enum.Font.Gotham
+continuousButton.Parent = mainFrame
+
+local continuousCorner = Instance.new("UICorner")
+continuousCorner.CornerRadius = UDim.new(0, 5)
+continuousCorner.Parent = continuousButton
 
 -- Crear sonidos de notificación
 local notificationSounds = {}
@@ -213,59 +233,6 @@ local function cleanupMemory()
     if cleanedCount > 0 then
         print("🧹 Memoria limpiada:", cleanedCount, "objetos removidos")
     end
-end
-
--- Función de debug para verificar búsqueda
-local function debugSearch()
-    print("🔍 === DEBUG BÚSQUEDA ===")
-    print("Buscando en workspace...")
-    
-    local function findPlotsFolder(container, depth)
-        local indent = string.rep("  ", depth or 0)
-        print(indent .. "📁 Revisando:", container.Name, "(" .. container.ClassName .. ")")
-        
-        for _, obj in pairs(container:GetChildren()) do
-            if obj.Name == "Plots" and obj:IsA("Folder") then
-                print(indent .. "✅ PLOTS ENCONTRADO en:", container.Name)
-                
-                for _, plot in pairs(obj:GetChildren()) do
-                    print(indent .. "  📋 Plot:", plot.Name)
-                    
-                    local function searchInPlot(plotContainer, plotDepth)
-                        if plotDepth > 5 then return end
-                        local plotIndent = string.rep("    ", plotDepth)
-                        
-                        for _, item in pairs(plotContainer:GetChildren()) do
-                            print(plotIndent .. "- Objeto:", item.Name, "(" .. item.ClassName .. ")")
-                            
-                            -- Verificar si coincide exactamente
-                            for _, targetName in pairs(targetModels) do
-                                if item.Name == targetName then
-                                    print(plotIndent .. "🎯 COINCIDENCIA EXACTA:", item.Name)
-                                    if item:IsA("Model") or item:IsA("BasePart") then
-                                        print(plotIndent .. "✅ Tipo válido para highlight")
-                                    else
-                                        print(plotIndent .. "❌ Tipo no válido:", item.ClassName)
-                                    end
-                                end
-                            end
-                            
-                            if item:IsA("Folder") or item:IsA("Model") then
-                                searchInPlot(item, plotDepth + 1)
-                            end
-                        end
-                    end
-                    
-                    searchInPlot(plot, 0)
-                end
-            elseif obj:IsA("Folder") and (depth or 0) < 3 then
-                findPlotsFolder(obj, (depth or 0) + 1)
-            end
-        end
-    end
-    
-    findPlotsFolder(workspace, 0)
-    print("🔍 === FIN DEBUG ===")
 end
 
 -- Función para crear ESP Highlight con color rainbow
@@ -388,7 +355,7 @@ local function findTargetModelsInPlots()
                                 end
                                 
                                 if item:IsA("Folder") or item:IsA("Model") then
-                                    searchInPlot(item, depth + 1)
+                                                                        searchInPlot(item, depth + 1)
                                 end
                             end
                         end
@@ -404,6 +371,43 @@ local function findTargetModelsInPlots()
     
     findPlotsFolder(workspace)
     return foundModels
+end
+
+-- NUEVA FUNCIÓN: Búsqueda continua mejorada
+local function performContinuousSearch()
+    if not espEnabled or not continuousSearchEnabled then return end
+    
+    local currentTime = tick()
+    
+    -- Solo buscar si ha pasado el intervalo
+    if currentTime - lastSearchTime < searchInterval then return end
+    
+    lastSearchTime = currentTime
+    
+    print("🔄 Búsqueda continua ejecutándose...")
+    
+    -- Primero limpiar highlights expirados y objetos que ya no existen
+    cleanupExpiredESP()
+    
+    -- Luego buscar y marcar solo objetos válidos y nuevos
+    local foundModels = findTargetModelsInPlots()
+    
+    local newDetections = 0
+    for _, modelData in pairs(foundModels) do
+        -- Verificar una vez más que el objeto es válido antes de crear ESP
+        if isObjectValid(modelData.object) then
+            local espData = createESPHighlight(modelData.object, modelData.name)
+            if espData then
+                newDetections = newDetections + 1
+            end
+        end
+    end
+    
+    if newDetections > 0 then
+        print("🎯 Búsqueda continua:", newDetections, "brainrots nuevos detectados")
+    end
+    
+    print("📊 Total highlights activos:", #espLines)
 end
 
 -- Función para actualizar ESP (solo cuando sea necesario)
@@ -488,6 +492,8 @@ espButton.MouseButton1Click:Connect(function()
         espButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
         print("🌈 ESP Highlight activado - Marcando brainrots nuevos...")
         updateESP() -- Marcar brainrots al activar
+        -- Resetear timer de búsqueda continua
+        lastSearchTime = 0
     else
         espButton.Text = "ESP: OFF"
         espButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
@@ -510,6 +516,22 @@ notifButton.MouseButton1Click:Connect(function()
         notifButton.Text = "Notificaciones: OFF"
         notifButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
         print("🔕 Notificaciones desactivadas")
+    end
+end)
+
+-- NUEVO EVENTO: Botón de búsqueda continua
+continuousButton.MouseButton1Click:Connect(function()
+    continuousSearchEnabled = not continuousSearchEnabled
+    if continuousSearchEnabled then
+        continuousButton.Text = "Búsqueda Continua: ON"
+        continuousButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+        print("🔄 Búsqueda continua activada - Detectará brainrots cada", searchInterval, "segundos")
+        -- Resetear timer para búsqueda inmediata
+        lastSearchTime = 0
+    else
+        continuousButton.Text = "Búsqueda Continua: OFF"
+        continuousButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+        print("⏸️ Búsqueda continua desactivada - Solo detectará al entrar jugadores")
     end
 end)
 
@@ -553,7 +575,7 @@ Players.PlayerRemoving:Connect(function(leavingPlayer)
     print("ℹ️ No se actualiza ESP cuando sale un jugador (evita objetos fantasma)")
 end)
 
--- Loop principal para efectos rainbow, limpieza y memoria
+-- LOOP PRINCIPAL MEJORADO: Incluye búsqueda continua
 local lastCleanupTime = 0
 local lastMemoryCleanup = 0
 RunService.Heartbeat:Connect(function()
@@ -565,6 +587,11 @@ RunService.Heartbeat:Connect(function()
     -- Actualizar colores rainbow de los highlights ESP
     if espEnabled and #espLines > 0 then
         updateRainbowColors()
+    end
+    
+    -- NUEVA CARACTERÍSTICA: Búsqueda continua
+    if espEnabled and continuousSearchEnabled then
+        performContinuousSearch()
     end
     
     -- Limpiar highlights expirados cada 2 segundos
@@ -629,6 +656,12 @@ local function showMemoryStatus()
     print("Total en memoria:", count, "objetos")
 end
 
+-- NUEVA FUNCIÓN DE PRUEBA: Cambiar intervalo de búsqueda
+local function setSearchInterval(seconds)
+    searchInterval = seconds or 2
+    print("🔄 Intervalo de búsqueda cambiado a:", searchInterval, "segundos")
+end
+
 -- Comandos de prueba
 _G.testESPSound = testSound
 _G.testPlotSearch = testPlotSearch
@@ -636,9 +669,9 @@ _G.forceUpdateESP = forceUpdateESP
 _G.cleanupAllESP = cleanupAllESP
 _G.clearMemory = clearMemory
 _G.showMemoryStatus = showMemoryStatus
-_G.debugSearch = debugSearch
+_G.setSearchInterval = setSearchInterval
 
-print("🚀 ESP Panel Rainbow con Sistema de Memoria cargado exitosamente!")
+print("🚀 ESP Panel Rainbow con Búsqueda Continua cargado exitosamente!")
 print("💡 Tips:")
 print("   - '_G.testESPSound()' para probar el sonido")
 print("   - '_G.testPlotSearch()' para probar la búsqueda")
@@ -646,21 +679,31 @@ print("   - '_G.forceUpdateESP()' para forzar actualización de ESP")
 print("   - '_G.cleanupAllESP()' para limpiar todo el ESP")
 print("   - '_G.clearMemory()' para limpiar la memoria")
 print("   - '_G.showMemoryStatus()' para ver el estado de la memoria")
-print("   - '_G.debugSearch()' para debug detallado de búsqueda")
-print("🌈 Características nuevas:")
+print("   - '_G.setSearchInterval(segundos)' para cambiar intervalo de búsqueda")
+print("🌈 Características NUEVAS:")
+print("   🔄 BÚSQUEDA CONTINUA - Detecta brainrots cada", searchInterval, "segundos")
+print("   🎛️ Botón para activar/desactivar búsqueda continua")
+print("   ⚡ Detección en tiempo real sin límites")
+print("   🎯 Encuentra TODOS los brainrots que aparezcan")
+print("🌈 Características existentes:")
 print("   ✅ Highlights rainbow animados en lugar de líneas")
 print("   🧠 Sistema de memoria que previene re-detección")
 print("   ⏰ Memoria se limpia automáticamente después de 25s")
 print("   🎯 Solo detecta brainrots nuevos o no detectados recientemente")
 print("   🔍 COINCIDENCIA EXACTA - Respeta mayúsculas y minúsculas")
-print("🎯 Características existentes:")
 print("   ✅ Permite brainrots duplicados (si no están en memoria)")
 print("   ⏰ Highlights ESP expiran en 25 segundos")
-print("   🔄 Solo se actualiza cuando ENTRAN jugadores")
 print("   🗑️ Limpia automáticamente objetos que ya no existen")
 print("   💡 Highlights más visibles y eficientes que líneas")
-print("   🚫 No marca objetos fantasma cuando salen jugadores")
 print("🎯 Buscando estos brainrots en carpetas Plots (COINCIDENCIA EXACTA):")
 for i, name in pairs(targetModels) do
     print("   " .. i .. ". " .. name)
 end
+
+print("🔥 SOLUCIÓN AL PROBLEMA:")
+print("   ✅ Ahora detecta TODOS los brainrots sin límite")
+print("   ✅ Búsqueda continua cada", searchInterval, "segundos cuando ESP está ON")
+print("   ✅ Detecta brainrots que aparecen DESPUÉS de que los jugadores se unen")
+print("   ✅ No depende solo de la entrada de jugadores")
+print("   ✅ Puedes desactivar la búsqueda continua si causa lag")
+print("   ✅ Intervalo de búsqueda configurable con _G.setSearchInterval()")
