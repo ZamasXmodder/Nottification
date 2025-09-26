@@ -9,6 +9,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Modelos objetivo
 local targetModels = {
+    "Pot Hotspot",
     "Mariachi Corazoni",
     "Secret Lucky Block",
     "To to to Sahur",
@@ -27,7 +28,7 @@ local targetModels = {
     "Los Combinasionas",
     "Nuclearo Dinosauro",
     "Las Sis",
-    "Los Hotspositos",
+    "Los Hotspotsitos",
     "Tralalalaledon",
     "Ketupat Kepat",
     "Los Bros",
@@ -214,11 +215,8 @@ local function cleanupMemory()
     end
 end
 
--- Función para crear líneas ESP con color rainbow
-local function createESPLine(targetObject, targetName)
-    local character = player.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    
+-- Función para crear ESP Highlight con color rainbow
+local function createESPHighlight(targetObject, targetName)
     -- Verificar que el objeto aún existe
     if not isObjectValid(targetObject) then
         print("❌ Objeto no válido:", targetName)
@@ -231,58 +229,23 @@ local function createESPLine(targetObject, targetName)
         return
     end
     
-    local targetPosition
-    if targetObject:IsA("Model") then
-        if targetObject.PrimaryPart then
-            targetPosition = targetObject.PrimaryPart.Position
-        elseif targetObject:FindFirstChildOfClass("BasePart") then
-            targetPosition = targetObject:FindFirstChildOfClass("BasePart").Position
-        else
-            return
-        end
-    elseif targetObject:IsA("BasePart") then
-        targetPosition = targetObject.Position
-    else
-        return
-    end
-    
     -- Marcar como detectado en memoria
     markAsDetected(targetObject)
     
-    -- Crear línea usando Beam súper delgada con color rainbow
-    local attachment0 = Instance.new("Attachment")
-    local attachment1 = Instance.new("Attachment")
+    -- Crear Highlight con color rainbow
+    local highlight = Instance.new("Highlight")
+    highlight.Parent = targetObject
+    highlight.FillColor = getRainbowColor(rainbowHue)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255) -- Contorno blanco
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     
-    attachment0.Parent = character.HumanoidRootPart
-    
-    local targetPart = Instance.new("Part")
-    targetPart.Anchored = true
-    targetPart.CanCollide = false
-    targetPart.Transparency = 1
-    targetPart.Size = Vector3.new(0.1, 0.1, 0.1)
-    targetPart.Position = targetPosition
-    targetPart.Parent = workspace
-    
-    attachment1.Parent = targetPart
-    
-    local beam = Instance.new("Beam")
-    beam.Attachment0 = attachment0
-    beam.Attachment1 = attachment1
-    beam.Color = ColorSequence.new(getRainbowColor(rainbowHue))
-    beam.Width0 = 0.1
-    beam.Width1 = 0.1
-    beam.Transparency = NumberSequence.new(0.3)
-    beam.FaceCamera = true
-    beam.Parent = workspace
-    
-    -- Crear ID único para cada línea
+    -- Crear ID único para cada highlight
     local uniqueId = tostring(targetObject) .. "_" .. tick()
     
     local espData = {
-        beam = beam,
-        attachment0 = attachment0,
-        attachment1 = attachment1,
-        targetPart = targetPart,
+        highlight = highlight,
         timestamp = tick(),
         targetName = targetName,
         uniqueId = uniqueId,
@@ -292,11 +255,11 @@ local function createESPLine(targetObject, targetName)
     
     table.insert(espLines, espData)
     
-    print("🌈 ESP rainbow creado para:", targetName, "ID:", uniqueId)
+    print("🌈 ESP Highlight creado para:", targetName, "ID:", uniqueId)
     return espData
 end
 
--- Función mejorada para limpiar líneas ESP
+-- Función mejorada para limpiar highlights ESP expirados
 local function cleanupExpiredESP()
     local currentTime = tick()
     for i = #espLines, 1, -1 do
@@ -317,24 +280,21 @@ local function cleanupExpiredESP()
         end
         
         if shouldRemove then
-            if espData.beam then espData.beam:Destroy() end
-            if espData.attachment0 then espData.attachment0:Destroy() end
-            if espData.attachment1 then espData.attachment1:Destroy() end
-            if espData.targetPart then espData.targetPart:Destroy() end
+            if espData.highlight then espData.highlight:Destroy() end
             
             table.remove(espLines, i)
-            print("🗑️ ESP removido para:", espData.targetName, "- Razón:", reason)
+            print("🗑️ ESP Highlight removido para:", espData.targetName, "- Razón:", reason)
         end
     end
 end
 
--- Función para actualizar colores rainbow de todas las líneas ESP
+-- Función para actualizar colores rainbow de todos los highlights ESP
 local function updateRainbowColors()
     for _, espData in pairs(espLines) do
-        if espData.beam and isObjectValid(espData.beam) then
-            -- Cada línea tiene su propio offset de color basado en su hue inicial
+        if espData.highlight and isObjectValid(espData.highlight) then
+            -- Cada highlight tiene su propio offset de color basado en su hue inicial
             local lineHue = (espData.initialHue + (tick() - espData.timestamp) * 0.5) % 1
-            espData.beam.Color = ColorSequence.new(getRainbowColor(lineHue))
+            espData.highlight.FillColor = getRainbowColor(lineHue)
         end
     end
 end
