@@ -9,6 +9,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Modelos objetivo
 local targetModels = {
+    "La Grande Combinasion",
     "Pot Hotspot",
     "Mariachi Corazoni",
     "Secret Lucky Block",
