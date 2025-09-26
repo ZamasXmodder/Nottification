@@ -9,7 +9,6 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Modelos objetivo
 local targetModels = {
-    "Pot Hotspot",
     "Mariachi Corazoni",
     "Secret Lucky Block",
     "To to to Sahur",
@@ -28,7 +27,7 @@ local targetModels = {
     "Los Combinasionas",
     "Nuclearo Dinosauro",
     "Las Sis",
-    "Los Hotspotsitos",
+    "Los Hotspositos",
     "Tralalalaledon",
     "Ketupat Kepat",
     "Los Bros",
@@ -215,6 +214,59 @@ local function cleanupMemory()
     end
 end
 
+-- Función de debug para verificar búsqueda
+local function debugSearch()
+    print("🔍 === DEBUG BÚSQUEDA ===")
+    print("Buscando en workspace...")
+    
+    local function findPlotsFolder(container, depth)
+        local indent = string.rep("  ", depth or 0)
+        print(indent .. "📁 Revisando:", container.Name, "(" .. container.ClassName .. ")")
+        
+        for _, obj in pairs(container:GetChildren()) do
+            if obj.Name == "Plots" and obj:IsA("Folder") then
+                print(indent .. "✅ PLOTS ENCONTRADO en:", container.Name)
+                
+                for _, plot in pairs(obj:GetChildren()) do
+                    print(indent .. "  📋 Plot:", plot.Name)
+                    
+                    local function searchInPlot(plotContainer, plotDepth)
+                        if plotDepth > 5 then return end
+                        local plotIndent = string.rep("    ", plotDepth)
+                        
+                        for _, item in pairs(plotContainer:GetChildren()) do
+                            print(plotIndent .. "- Objeto:", item.Name, "(" .. item.ClassName .. ")")
+                            
+                            -- Verificar si coincide exactamente
+                            for _, targetName in pairs(targetModels) do
+                                if item.Name == targetName then
+                                    print(plotIndent .. "🎯 COINCIDENCIA EXACTA:", item.Name)
+                                    if item:IsA("Model") or item:IsA("BasePart") then
+                                        print(plotIndent .. "✅ Tipo válido para highlight")
+                                    else
+                                        print(plotIndent .. "❌ Tipo no válido:", item.ClassName)
+                                    end
+                                end
+                            end
+                            
+                            if item:IsA("Folder") or item:IsA("Model") then
+                                searchInPlot(item, plotDepth + 1)
+                            end
+                        end
+                    end
+                    
+                    searchInPlot(plot, 0)
+                end
+            elseif obj:IsA("Folder") and (depth or 0) < 3 then
+                findPlotsFolder(obj, (depth or 0) + 1)
+            end
+        end
+    end
+    
+    findPlotsFolder(workspace, 0)
+    print("🔍 === FIN DEBUG ===")
+end
+
 -- Función para crear ESP Highlight con color rainbow
 local function createESPHighlight(targetObject, targetName)
     -- Verificar que el objeto aún existe
@@ -237,8 +289,8 @@ local function createESPHighlight(targetObject, targetName)
     highlight.Parent = targetObject
     highlight.FillColor = getRainbowColor(rainbowHue)
     highlight.OutlineColor = Color3.fromRGB(255, 255, 255) -- Contorno blanco
-    highlight.FillTransparency = 0.3
-    highlight.OutlineTransparency = 0
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0.2
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     
     -- Crear ID único para cada highlight
@@ -255,7 +307,7 @@ local function createESPHighlight(targetObject, targetName)
     
     table.insert(espLines, espData)
     
-    print("🌈 ESP Highlight creado para:", targetName, "ID:", uniqueId)
+    print("🌈 ESP Highlight creado para:", targetName, "ID:", uniqueId, "Parent:", targetObject:GetFullName())
     return espData
 end
 
@@ -359,20 +411,24 @@ local function updateESP()
     
     print("🔄 Actualizando ESP...")
     
-    -- Primero limpiar líneas expiradas y objetos que ya no existen
+    -- Primero limpiar highlights expirados y objetos que ya no existen
     cleanupExpiredESP()
     
     -- Luego buscar y marcar solo objetos válidos y nuevos
     local foundModels = findTargetModelsInPlots()
     
+    print("📊 Objetos encontrados:", #foundModels)
+    
     for _, modelData in pairs(foundModels) do
+        print("🎯 Procesando:", modelData.name, "- Válido:", isObjectValid(modelData.object))
         -- Verificar una vez más que el objeto es válido antes de crear ESP
         if isObjectValid(modelData.object) then
-            createESPLine(modelData.object, modelData.name)
+            createESPHighlight(modelData.object, modelData.name)
         end
     end
     
     print("📊 ESP actualizado:", #foundModels, "brainrots nuevos marcados")
+    print("📊 Total highlights activos:", #espLines)
 end
 
 -- Función para mostrar toast de notificación
@@ -429,20 +485,17 @@ espButton.MouseButton1Click:Connect(function()
     if espEnabled then
         espButton.Text = "ESP: ON"
         espButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
-        print("🌈 ESP rainbow activado - Marcando brainrots nuevos...")
+        print("🌈 ESP Highlight activado - Marcando brainrots nuevos...")
         updateESP() -- Marcar brainrots al activar
     else
         espButton.Text = "ESP: OFF"
         espButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-        -- Limpiar todas las líneas ESP
+        -- Limpiar todos los highlights ESP
         for _, espData in pairs(espLines) do
-            if espData.beam then espData.beam:Destroy() end
-            if espData.attachment0 then espData.attachment0:Destroy() end
-            if espData.attachment1 then espData.attachment1:Destroy() end
-            if espData.targetPart then espData.targetPart:Destroy() end
+            if espData.highlight then espData.highlight:Destroy() end
         end
         espLines = {}
-        print("❌ ESP desactivado - Líneas limpiadas")
+        print("❌ ESP Highlight desactivado - Highlights limpiados")
     end
 end)
 
@@ -508,12 +561,12 @@ RunService.Heartbeat:Connect(function()
     -- Actualizar hue global del rainbow
     rainbowHue = (rainbowHue + 0.02) % 1
     
-    -- Actualizar colores rainbow de las líneas ESP
+    -- Actualizar colores rainbow de los highlights ESP
     if espEnabled and #espLines > 0 then
         updateRainbowColors()
     end
     
-    -- Limpiar líneas expiradas cada 2 segundos
+    -- Limpiar highlights expirados cada 2 segundos
     if espEnabled and currentTime - lastCleanupTime >= 2 then
         lastCleanupTime = currentTime
         cleanupExpiredESP()
@@ -547,15 +600,12 @@ local function forceUpdateESP()
 end
 
 local function cleanupAllESP()
-    print("🧪 Limpiando todo el ESP...")
+    print("🧪 Limpiando todos los highlights ESP...")
     for _, espData in pairs(espLines) do
-        if espData.beam then espData.beam:Destroy() end
-        if espData.attachment0 then espData.attachment0:Destroy() end
-        if espData.attachment1 then espData.attachment1:Destroy() end
-        if espData.targetPart then espData.targetPart:Destroy() end
+        if espData.highlight then espData.highlight:Destroy() end
     end
     espLines = {}
-    print("✅ Todo el ESP limpiado")
+    print("✅ Todos los highlights ESP limpiados")
 end
 
 local function clearMemory()
@@ -585,6 +635,7 @@ _G.forceUpdateESP = forceUpdateESP
 _G.cleanupAllESP = cleanupAllESP
 _G.clearMemory = clearMemory
 _G.showMemoryStatus = showMemoryStatus
+_G.debugSearch = debugSearch
 
 print("🚀 ESP Panel Rainbow con Sistema de Memoria cargado exitosamente!")
 print("💡 Tips:")
@@ -594,18 +645,19 @@ print("   - '_G.forceUpdateESP()' para forzar actualización de ESP")
 print("   - '_G.cleanupAllESP()' para limpiar todo el ESP")
 print("   - '_G.clearMemory()' para limpiar la memoria")
 print("   - '_G.showMemoryStatus()' para ver el estado de la memoria")
+print("   - '_G.debugSearch()' para debug detallado de búsqueda")
 print("🌈 Características nuevas:")
-print("   ✅ Colores rainbow animados en las líneas ESP")
+print("   ✅ Highlights rainbow animados en lugar de líneas")
 print("   🧠 Sistema de memoria que previene re-detección")
 print("   ⏰ Memoria se limpia automáticamente después de 25s")
 print("   🎯 Solo detecta brainrots nuevos o no detectados recientemente")
 print("   🔍 COINCIDENCIA EXACTA - Respeta mayúsculas y minúsculas")
 print("🎯 Características existentes:")
 print("   ✅ Permite brainrots duplicados (si no están en memoria)")
-print("   ⏰ Líneas ESP expiran en 25 segundos")
+print("   ⏰ Highlights ESP expiran en 25 segundos")
 print("   🔄 Solo se actualiza cuando ENTRAN jugadores")
 print("   🗑️ Limpia automáticamente objetos que ya no existen")
-print("   📏 Líneas súper delgadas para mejor rendimiento")
+print("   💡 Highlights más visibles y eficientes que líneas")
 print("   🚫 No marca objetos fantasma cuando salen jugadores")
 print("🎯 Buscando estos brainrots en carpetas Plots (COINCIDENCIA EXACTA):")
 for i, name in pairs(targetModels) do
