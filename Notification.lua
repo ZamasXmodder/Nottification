@@ -9,6 +9,10 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Modelos objetivo
 local targetModels = {
+    "Tang Tang Kelentang",
+    "Money Money Puggy",
+    "Los Primos",
+    "Los Tacoritas",
     "La Grande Combinasion",
     "Pot Hotspot",
     "Mariachi Corazoni",
@@ -42,8 +46,10 @@ local targetModels = {
 -- Variables
 local espEnabled = false
 local notificationsEnabled = false
+local playerESPEnabled = false -- NUEVA VARIABLE
 local espLines = {}
 local trackedPlayers = {}
+local playerESPData = {} -- NUEVA VARIABLE: Almacenar datos ESP de jugadores
 
 -- Sistema de memoria para brainrots detectados
 local detectedBrainrots = {} -- Almacena objetos que ya fueron detectados
@@ -66,7 +72,7 @@ screenGui.ResetOnSpawn = false
 -- Panel principal - AUMENTAR TAMAÑO PARA NUEVO BOTÓN
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainPanel"
-mainFrame.Size = UDim2.new(0, 200, 0, 160) -- Aumentado de 120 a 160
+mainFrame.Size = UDim2.new(0, 200, 0, 200) -- Aumentado de 160 a 200
 mainFrame.Position = UDim2.new(1, -210, 0, 10)
 mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 mainFrame.BorderSizePixel = 0
@@ -125,7 +131,7 @@ local notifCorner = Instance.new("UICorner")
 notifCorner.CornerRadius = UDim.new(0, 5)
 notifCorner.Parent = notifButton
 
--- NUEVO BOTÓN: Búsqueda Continua
+-- Búsqueda Continua
 local continuousButton = Instance.new("TextButton")
 continuousButton.Name = "ContinuousButton"
 continuousButton.Size = UDim2.new(1, -20, 0, 30)
@@ -140,6 +146,22 @@ continuousButton.Parent = mainFrame
 local continuousCorner = Instance.new("UICorner")
 continuousCorner.CornerRadius = UDim.new(0, 5)
 continuousCorner.Parent = continuousButton
+
+-- NUEVO BOTÓN: ESP Player
+local playerESPButton = Instance.new("TextButton")
+playerESPButton.Name = "PlayerESPButton"
+playerESPButton.Size = UDim2.new(1, -20, 0, 30)
+playerESPButton.Position = UDim2.new(0, 10, 0, 160)
+playerESPButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+playerESPButton.Text = "ESP Player: OFF"
+playerESPButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+playerESPButton.TextScaled = true
+playerESPButton.Font = Enum.Font.Gotham
+playerESPButton.Parent = mainFrame
+
+local playerESPCorner = Instance.new("UICorner")
+playerESPCorner.CornerRadius = UDim.new(0, 5)
+playerESPCorner.Parent = playerESPButton
 
 -- Crear sonidos de notificación
 local notificationSounds = {}
@@ -178,6 +200,113 @@ end
 -- Función para generar color rainbow
 local function getRainbowColor(hue)
     return Color3.fromHSV(hue, 1, 1)
+end
+
+-- NUEVA FUNCIÓN: Crear highlight y línea para jugadores
+local function createPlayerESP(targetPlayer)
+    if targetPlayer == player then
+        print("⚠️ Intentando marcar al jugador local - cancelado")
+        return -- No marcar al jugador local
+    end
+    
+    if not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        print("⚠️ Jugador sin character válido:", targetPlayer.Name)
+        return
+    end
+    
+    print("👤 Creando ESP para jugador:", targetPlayer.Name)
+    
+    -- Crear highlight rojo
+    local highlight = Instance.new("Highlight")
+    highlight.Parent = targetPlayer.Character
+    highlight.FillColor = Color3.fromRGB(255, 0, 0) -- Rojo
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255) -- Contorno blanco
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0.1
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    
+    -- Crear línea desde el jugador local
+    local line = Instance.new("Part")
+    line.Name = "PlayerESPLine"
+    line.Size = Vector3.new(0.1, 0.1, 1)
+    line.Material = Enum.Material.Neon
+    line.BrickColor = BrickColor.new("Really red")
+    line.Anchored = true
+    line.CanCollide = false
+    line.Parent = workspace
+    
+    -- Datos del ESP
+    local espData = {
+        targetPlayer = targetPlayer,
+        highlight = highlight,
+        line = line,
+        timestamp = tick()
+    }
+    
+    playerESPData[targetPlayer.UserId] = espData
+    print("✅ ESP Player creado para:", targetPlayer.Name)
+    
+    return espData
+end
+
+-- NUEVA FUNCIÓN: Actualizar posiciones de líneas de jugadores
+local function updatePlayerESPLines()
+    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+        return
+    end
+    
+    local myPosition = player.Character.HumanoidRootPart.Position
+    
+    for userId, espData in pairs(playerESPData) do
+        if espData.targetPlayer and espData.targetPlayer.Character and espData.targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local targetPosition = espData.targetPlayer.Character.HumanoidRootPart.Position
+            
+            -- Calcular posición y orientación de la línea
+            local midPoint = (myPosition + targetPosition) / 2
+            local distance = (targetPosition - myPosition).Magnitude
+            local direction = (targetPosition - myPosition).Unit
+            
+            -- Actualizar línea
+            if espData.line and espData.line.Parent then
+                espData.line.Size = Vector3.new(0.1, 0.1, distance)
+                espData.line.CFrame = CFrame.lookAt(midPoint, targetPosition)
+            end
+        else
+            -- El jugador ya no tiene character válido - limpiar
+            print("🗑️ Limpiando ESP de jugador sin character:", espData.targetPlayer and espData.targetPlayer.Name or "Desconocido")
+            if espData.highlight then espData.highlight:Destroy() end
+            if espData.line then espData.line:Destroy() end
+            playerESPData[userId] = nil
+        end
+    end
+end
+
+-- NUEVA FUNCIÓN: Limpiar ESP de jugadores
+local function cleanupPlayerESP()
+    for userId, espData in pairs(playerESPData) do
+        if espData.highlight then espData.highlight:Destroy() end
+        if espData.line then espData.line:Destroy() end
+    end
+    playerESPData = {}
+    print("🗑️ Todo el ESP de jugadores limpiado")
+end
+
+-- NUEVA FUNCIÓN: Actualizar ESP de todos los jugadores
+local function updatePlayerESP()
+    if not playerESPEnabled then return end
+    
+    print("👥 Actualizando ESP de jugadores...")
+    
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character then
+            -- Solo crear ESP si no existe ya
+            if not playerESPData[otherPlayer.UserId] then
+                createPlayerESP(otherPlayer)
+            end
+        end
+    end
+    
+    print("📊 ESP Player activos:", #playerESPData)
 end
 
 -- Función para generar ID único de objeto para el sistema de memoria
@@ -356,7 +485,7 @@ local function findTargetModelsInPlots()
                                 end
                                 
                                 if item:IsA("Folder") or item:IsA("Model") then
-                                                                        searchInPlot(item, depth + 1)
+                                    searchInPlot(item, depth + 1)
                                 end
                             end
                         end
@@ -520,7 +649,7 @@ notifButton.MouseButton1Click:Connect(function()
     end
 end)
 
--- NUEVO EVENTO: Botón de búsqueda continua
+-- Evento: Botón de búsqueda continua
 continuousButton.MouseButton1Click:Connect(function()
     continuousSearchEnabled = not continuousSearchEnabled
     if continuousSearchEnabled then
@@ -533,6 +662,22 @@ continuousButton.MouseButton1Click:Connect(function()
         continuousButton.Text = "Búsqueda Continua: OFF"
         continuousButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
         print("⏸️ Búsqueda continua desactivada - Solo detectará al entrar jugadores")
+    end
+end)
+
+-- NUEVO EVENTO: Botón de ESP Player
+playerESPButton.MouseButton1Click:Connect(function()
+    playerESPEnabled = not playerESPEnabled
+    if playerESPEnabled then
+        playerESPButton.Text = "ESP Player: ON"
+        playerESPButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+        print("👥 ESP Player activado - Marcando jugadores...")
+        updatePlayerESP() -- Marcar jugadores al activar
+    else
+        playerESPButton.Text = "ESP Player: OFF"
+        playerESPButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+        print("❌ ESP Player desactivado - Limpiando highlights y líneas...")
+        cleanupPlayerESP() -- Limpiar todo el ESP de jugadores
     end
 end)
 
@@ -564,6 +709,12 @@ Players.PlayerAdded:Connect(function(newPlayer)
         wait(1) -- Pequeña pausa para que el jugador se establezca
         updateESP()
     end
+    
+    -- Crear ESP para el nuevo jugador si Player ESP está activado
+    if playerESPEnabled then
+        wait(2) -- Esperar a que el character se cargue
+        createPlayerESP(newPlayer)
+    end
 end)
 
 -- Evento cuando un jugador se VA
@@ -572,13 +723,72 @@ Players.PlayerRemoving:Connect(function(leavingPlayer)
     
     trackedPlayers[leavingPlayer.UserId] = nil
     
+    -- Limpiar ESP del jugador que se va
+    if playerESPData[leavingPlayer.UserId] then
+        local espData = playerESPData[leavingPlayer.UserId]
+        if espData.highlight then espData.highlight:Destroy() end
+        if espData.line then espData.line:Destroy() end
+        playerESPData[leavingPlayer.UserId] = nil
+        print("🗑️ ESP limpiado para jugador que se fue:", leavingPlayer.Name)
+    end
+    
     -- NO actualizar ESP cuando sale un jugador para evitar marcar objetos inexistentes
     print("ℹ️ No se actualiza ESP cuando sale un jugador (evita objetos fantasma)")
 end)
 
--- LOOP PRINCIPAL MEJORADO: Incluye búsqueda continua
+-- Evento cuando un jugador respawnea
+Players.PlayerAdded:Connect(function(newPlayer)
+    -- Detectar cuando el character cambia (respawn)
+    newPlayer.CharacterAdded:Connect(function(character)
+        print("🔄 Character respawneado para:", newPlayer.Name)
+        
+        -- Si Player ESP está activado, recrear ESP después de un respawn
+        if playerESPEnabled and newPlayer ~= player then
+            wait(1) -- Esperar a que el character se establezca
+            
+            -- Limpiar ESP anterior si existe
+            if playerESPData[newPlayer.UserId] then
+                local espData = playerESPData[newPlayer.UserId]
+                if espData.highlight then espData.highlight:Destroy() end
+                if espData.line then espData.line:Destroy() end
+                playerESPData[newPlayer.UserId] = nil
+            end
+            
+            -- Crear nuevo ESP
+            createPlayerESP(newPlayer)
+        end
+    end)
+end)
+
+-- Para jugadores que ya están en el juego
+for _, existingPlayer in pairs(Players:GetPlayers()) do
+    if existingPlayer ~= player then
+        existingPlayer.CharacterAdded:Connect(function(character)
+            print("🔄 Character respawneado para:", existingPlayer.Name, "(jugador existente)")
+            
+            -- Si Player ESP está activado, recrear ESP después de un respawn
+            if playerESPEnabled then
+                wait(1) -- Esperar a que el character se establezca
+                
+                -- Limpiar ESP anterior si existe
+                if playerESPData[existingPlayer.UserId] then
+                    local espData = playerESPData[existingPlayer.UserId]
+                    if espData.highlight then espData.highlight:Destroy() end
+                    if espData.line then espData.line:Destroy() end
+                    playerESPData[existingPlayer.UserId] = nil
+                end
+                
+                -- Crear nuevo ESP
+                createPlayerESP(existingPlayer)
+            end
+        end)
+    end
+end
+
+-- LOOP PRINCIPAL MEJORADO: Incluye búsqueda continua y actualización de líneas de jugadores
 local lastCleanupTime = 0
 local lastMemoryCleanup = 0
+local lastPlayerESPUpdate = 0
 RunService.Heartbeat:Connect(function()
     local currentTime = tick()
     
@@ -593,6 +803,12 @@ RunService.Heartbeat:Connect(function()
     -- NUEVA CARACTERÍSTICA: Búsqueda continua
     if espEnabled and continuousSearchEnabled then
         performContinuousSearch()
+    end
+    
+    -- NUEVA CARACTERÍSTICA: Actualizar líneas de jugadores (optimizado - cada 0.1 segundos)
+    if playerESPEnabled and currentTime - lastPlayerESPUpdate >= 0.1 then
+        lastPlayerESPUpdate = currentTime
+        updatePlayerESPLines()
     end
     
     -- Limpiar highlights expirados cada 2 segundos
@@ -663,6 +879,26 @@ local function setSearchInterval(seconds)
     print("🔄 Intervalo de búsqueda cambiado a:", searchInterval, "segundos")
 end
 
+-- NUEVAS FUNCIONES DE PRUEBA: Para Player ESP
+local function testPlayerESP()
+    print("🧪 Probando ESP de jugadores...")
+    updatePlayerESP()
+end
+
+local function cleanupAllPlayerESP()
+    print("🧪 Limpiando todo el ESP de jugadores...")
+    cleanupPlayerESP()
+end
+
+local function showPlayerESPStatus()
+    print("👥 Estado del ESP de jugadores:")
+    print("   - ESP Player activado:", playerESPEnabled)
+    print("   - Jugadores con ESP:", #playerESPData)
+    for userId, espData in pairs(playerESPData) do
+        print("   - " .. espData.targetPlayer.Name .. " (Highlight: " .. tostring(espData.highlight ~= nil) .. ", Línea: " .. tostring(espData.line ~= nil) .. ")")
+    end
+end
+
 -- Comandos de prueba
 _G.testESPSound = testSound
 _G.testPlotSearch = testPlotSearch
@@ -671,8 +907,11 @@ _G.cleanupAllESP = cleanupAllESP
 _G.clearMemory = clearMemory
 _G.showMemoryStatus = showMemoryStatus
 _G.setSearchInterval = setSearchInterval
+_G.testPlayerESP = testPlayerESP
+_G.cleanupAllPlayerESP = cleanupAllPlayerESP
+_G.showPlayerESPStatus = showPlayerESPStatus
 
-print("🚀 ESP Panel Rainbow con Búsqueda Continua cargado exitosamente!")
+print("🚀 ESP Panel Rainbow con Player ESP cargado exitosamente!")
 print("💡 Tips:")
 print("   - '_G.testESPSound()' para probar el sonido")
 print("   - '_G.testPlotSearch()' para probar la búsqueda")
@@ -681,12 +920,23 @@ print("   - '_G.cleanupAllESP()' para limpiar todo el ESP")
 print("   - '_G.clearMemory()' para limpiar la memoria")
 print("   - '_G.showMemoryStatus()' para ver el estado de la memoria")
 print("   - '_G.setSearchInterval(segundos)' para cambiar intervalo de búsqueda")
+print("   - '_G.testPlayerESP()' para probar ESP de jugadores")
+print("   - '_G.cleanupAllPlayerESP()' para limpiar ESP de jugadores")
+print("   - '_G.showPlayerESPStatus()' para ver estado del ESP de jugadores")
+
 print("🌈 Características NUEVAS:")
+print("   👥 ESP PLAYER - Marca jugadores con highlight rojo y líneas")
+print("   🚫 Auto-exclusión - No te marca a ti mismo")
+print("   🔄 Respawn detection - Recrea ESP cuando los jugadores respawnean")
+print("   ⚡ Líneas actualizadas en tiempo real cada 0.1s")
+print("   🗑️ Auto-limpieza cuando jugadores se van o pierden character")
+print("   🎛️ Botón independiente para activar/desactivar Player ESP")
+
+print("🌈 Características existentes:")
 print("   🔄 BÚSQUEDA CONTINUA - Detecta brainrots cada", searchInterval, "segundos")
 print("   🎛️ Botón para activar/desactivar búsqueda continua")
 print("   ⚡ Detección en tiempo real sin límites")
 print("   🎯 Encuentra TODOS los brainrots que aparezcan")
-print("🌈 Características existentes:")
 print("   ✅ Highlights rainbow animados en lugar de líneas")
 print("   🧠 Sistema de memoria que previene re-detección")
 print("   ⏰ Memoria se limpia automáticamente después de 25s")
@@ -696,15 +946,20 @@ print("   ✅ Permite brainrots duplicados (si no están en memoria)")
 print("   ⏰ Highlights ESP expiran en 25 segundos")
 print("   🗑️ Limpia automáticamente objetos que ya no existen")
 print("   💡 Highlights más visibles y eficientes que líneas")
+
 print("🎯 Buscando estos brainrots en carpetas Plots (COINCIDENCIA EXACTA):")
 for i, name in pairs(targetModels) do
     print("   " .. i .. ". " .. name)
 end
 
-print("🔥 SOLUCIÓN AL PROBLEMA:")
+print("🔥 SOLUCIONES IMPLEMENTADAS:")
 print("   ✅ Ahora detecta TODOS los brainrots sin límite")
 print("   ✅ Búsqueda continua cada", searchInterval, "segundos cuando ESP está ON")
 print("   ✅ Detecta brainrots que aparecen DESPUÉS de que los jugadores se unen")
 print("   ✅ No depende solo de la entrada de jugadores")
 print("   ✅ Puedes desactivar la búsqueda continua si causa lag")
 print("   ✅ Intervalo de búsqueda configurable con _G.setSearchInterval()")
+print("   ✅ ESP Player con highlights rojos y líneas desde tu posición")
+print("   ✅ No te marca a ti mismo - solo a otros jugadores")
+print("   ✅ Optimizado para evitar lag - líneas se actualizan cada 0.1s")
+print("   ✅ Auto-detección de respawns y limpieza automática")
