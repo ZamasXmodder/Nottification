@@ -249,7 +249,7 @@ local function createPlayerESP(targetPlayer)
     return espData
 end
 
--- NUEVA FUNCIÓN: Actualizar posiciones de líneas de jugadores
+-- NUEVA FUNCIÓN MEJORADA: Actualizar posiciones de líneas de jugadores
 local function updatePlayerESPLines()
     if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
         return
@@ -257,38 +257,94 @@ local function updatePlayerESPLines()
     
     local myPosition = player.Character.HumanoidRootPart.Position
     
+    -- Lista de jugadores a remover (para evitar modificar tabla durante iteración)
+    local playersToRemove = {}
+    
     for userId, espData in pairs(playerESPData) do
-        if espData.targetPlayer and espData.targetPlayer.Character and espData.targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local shouldRemove = false
+        local removeReason = ""
+        
+        -- Verificar si el jugador y su character son válidos
+        if not espData.targetPlayer then
+            shouldRemove = true
+            removeReason = "jugador es nil"
+        elseif not espData.targetPlayer.Parent then
+            shouldRemove = true
+            removeReason = "jugador desconectado"
+        elseif not espData.targetPlayer.Character then
+            shouldRemove = true
+            removeReason = "sin character"
+        elseif not espData.targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            shouldRemove = true
+            removeReason = "sin HumanoidRootPart"
+        elseif not espData.line or not espData.line.Parent then
+            shouldRemove = true
+            removeReason = "línea destruida"
+        end
+        
+        if shouldRemove then
+            table.insert(playersToRemove, {userId = userId, reason = removeReason, name = espData.targetPlayer and espData.targetPlayer.Name or "Desconocido"})
+        else
+            -- Actualizar línea de manera más fluida
             local targetPosition = espData.targetPlayer.Character.HumanoidRootPart.Position
             
             -- Calcular posición y orientación de la línea
-            local midPoint = (myPosition + targetPosition) / 2
-            local distance = (targetPosition - myPosition).Magnitude
-            local direction = (targetPosition - myPosition).Unit
+            local direction = (targetPosition - myPosition)
+            local distance = direction.Magnitude
+            local midPoint = myPosition + (direction * 0.5)
             
-            -- Actualizar línea
-            if espData.line and espData.line.Parent then
-                espData.line.Size = Vector3.new(0.1, 0.1, distance)
-                espData.line.CFrame = CFrame.lookAt(midPoint, targetPosition)
+            -- Actualizar línea con CFrame más preciso
+            espData.line.Size = Vector3.new(0.1, 0.1, distance)
+            espData.line.CFrame = CFrame.new(midPoint, targetPosition)
+        end
+    end
+    
+    -- Remover jugadores que ya no son válidos
+    for _, removeData in pairs(playersToRemove) do
+        local espData = playerESPData[removeData.userId]
+        if espData then
+            print("🗑️ Limpiando ESP de jugador:", removeData.name, "- Razón:", removeData.reason)
+            if espData.highlight then 
+                espData.highlight:Destroy()
+                espData.highlight = nil
             end
-        else
-            -- El jugador ya no tiene character válido - limpiar
-            print("🗑️ Limpiando ESP de jugador sin character:", espData.targetPlayer and espData.targetPlayer.Name or "Desconocido")
-            if espData.highlight then espData.highlight:Destroy() end
-            if espData.line then espData.line:Destroy() end
-            playerESPData[userId] = nil
+            if espData.line then 
+                espData.line:Destroy()
+                espData.line = nil
+            end
+            playerESPData[removeData.userId] = nil
         end
     end
 end
 
--- NUEVA FUNCIÓN: Limpiar ESP de jugadores
+-- NUEVA FUNCIÓN MEJORADA: Limpiar ESP de jugadores
 local function cleanupPlayerESP()
+    print("🗑️ Iniciando limpieza completa de Player ESP...")
+    local cleanedCount = 0
+    
     for userId, espData in pairs(playerESPData) do
-        if espData.highlight then espData.highlight:Destroy() end
-        if espData.line then espData.line:Destroy() end
+        if espData.highlight then 
+            espData.highlight:Destroy()
+            espData.highlight = nil
+        end
+        if espData.line then 
+            espData.line:Destroy()
+            espData.line = nil
+        end
+        playerESPData[userId] = nil
+        cleanedCount = cleanedCount + 1
     end
-    playerESPData = {}
-    print("🗑️ Todo el ESP de jugadores limpiado")
+    
+    -- Limpieza adicional: buscar líneas huérfanas en workspace
+    local orphanedLines = 0
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj.Name == "PlayerESPLine" and obj:IsA("BasePart") then
+            obj:Destroy()
+            orphanedLines = orphanedLines + 1
+        end
+    end
+    
+    print("✅ Player ESP limpiado:", cleanedCount, "jugadores,", orphanedLines, "líneas huérfanas removidas")
 end
 
 -- NUEVA FUNCIÓN: Actualizar ESP de todos los jugadores
@@ -805,8 +861,8 @@ RunService.Heartbeat:Connect(function()
         performContinuousSearch()
     end
     
-    -- NUEVA CARACTERÍSTICA: Actualizar líneas de jugadores (optimizado - cada 0.1 segundos)
-    if playerESPEnabled and currentTime - lastPlayerESPUpdate >= 0.1 then
+    -- NUEVA CARACTERÍSTICA: Actualizar líneas de jugadores (optimizado - cada 0.03 segundos para más fluidez)
+    if playerESPEnabled and currentTime - lastPlayerESPUpdate >= 0.03 then
         lastPlayerESPUpdate = currentTime
         updatePlayerESPLines()
     end
@@ -893,10 +949,40 @@ end
 local function showPlayerESPStatus()
     print("👥 Estado del ESP de jugadores:")
     print("   - ESP Player activado:", playerESPEnabled)
-    print("   - Jugadores con ESP:", #playerESPData)
+    
+    local validCount = 0
     for userId, espData in pairs(playerESPData) do
-        print("   - " .. espData.targetPlayer.Name .. " (Highlight: " .. tostring(espData.highlight ~= nil) .. ", Línea: " .. tostring(espData.line ~= nil) .. ")")
+        local isValid = espData.targetPlayer and espData.targetPlayer.Parent and espData.targetPlayer.Character
+        if isValid then validCount = validCount + 1 end
+        print("   - " .. (espData.targetPlayer and espData.targetPlayer.Name or "Jugador Desconocido") .. 
+              " (Válido: " .. tostring(isValid) .. 
+              ", Highlight: " .. tostring(espData.highlight ~= nil) .. 
+              ", Línea: " .. tostring(espData.line ~= nil and espData.line.Parent ~= nil) .. ")")
     end
+    print("   - Total jugadores válidos:", validCount, "de", #playerESPData)
+    
+    -- Buscar líneas huérfanas
+    local orphanedLines = 0
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj.Name == "PlayerESPLine" and obj:IsA("BasePart") then
+            orphanedLines = orphanedLines + 1
+        end
+    end
+    if orphanedLines > 0 then
+        print("   ⚠️ Líneas huérfanas detectadas:", orphanedLines)
+    end
+end
+
+local function cleanupOrphanedLines()
+    print("🧹 Limpiando líneas huérfanas...")
+    local count = 0
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj.Name == "PlayerESPLine" and obj:IsA("BasePart") then
+            obj:Destroy()
+            count = count + 1
+        end
+    end
+    print("✅ Líneas huérfanas limpiadas:", count)
 end
 
 -- Comandos de prueba
@@ -910,6 +996,7 @@ _G.setSearchInterval = setSearchInterval
 _G.testPlayerESP = testPlayerESP
 _G.cleanupAllPlayerESP = cleanupAllPlayerESP
 _G.showPlayerESPStatus = showPlayerESPStatus
+_G.cleanupOrphanedLines = cleanupOrphanedLines
 
 print("🚀 ESP Panel Rainbow con Player ESP cargado exitosamente!")
 print("💡 Tips:")
@@ -923,14 +1010,17 @@ print("   - '_G.setSearchInterval(segundos)' para cambiar intervalo de búsqueda
 print("   - '_G.testPlayerESP()' para probar ESP de jugadores")
 print("   - '_G.cleanupAllPlayerESP()' para limpiar ESP de jugadores")
 print("   - '_G.showPlayerESPStatus()' para ver estado del ESP de jugadores")
+print("   - '_G.cleanupOrphanedLines()' para limpiar líneas huérfanas")
 
 print("🌈 Características NUEVAS:")
 print("   👥 ESP PLAYER - Marca jugadores con highlight rojo y líneas")
 print("   🚫 Auto-exclusión - No te marca a ti mismo")
 print("   🔄 Respawn detection - Recrea ESP cuando los jugadores respawnean")
-print("   ⚡ Líneas actualizadas en tiempo real cada 0.1s")
+print("   ⚡ Líneas actualizadas en tiempo real cada 0.03s (MÁS FLUIDAS)")
 print("   🗑️ Auto-limpieza cuando jugadores se van o pierden character")
 print("   🎛️ Botón independiente para activar/desactivar Player ESP")
+print("   🧹 Sistema mejorado de limpieza de líneas huérfanas")
+print("   🎯 CFrame optimizado para movimiento más fluido")
 
 print("🌈 Características existentes:")
 print("   🔄 BÚSQUEDA CONTINUA - Detecta brainrots cada", searchInterval, "segundos")
@@ -961,5 +1051,8 @@ print("   ✅ Puedes desactivar la búsqueda continua si causa lag")
 print("   ✅ Intervalo de búsqueda configurable con _G.setSearchInterval()")
 print("   ✅ ESP Player con highlights rojos y líneas desde tu posición")
 print("   ✅ No te marca a ti mismo - solo a otros jugadores")
-print("   ✅ Optimizado para evitar lag - líneas se actualizan cada 0.1s")
+print("   ✅ Optimizado para evitar lag - líneas se actualizan cada 0.03s")
 print("   ✅ Auto-detección de respawns y limpieza automática")
+print("   ✅ Sistema mejorado anti-líneas fantasma")
+print("   ✅ Limpieza automática de líneas huérfanas")
+print("   ✅ CFrame optimizado para movimiento más fluido y preciso")
