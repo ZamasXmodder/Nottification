@@ -9,6 +9,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Modelos objetivo
 local targetModels = {
+    "La Secret Combinasion",
     "Burguro And Fryuro",
     "Los 67",
     "Chillin Chili",
