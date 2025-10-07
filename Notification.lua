@@ -1,12 +1,13 @@
 --// =========================
---//  ESP LITE+ SECURE v1.3.1
---//  Brainrots ESP (15s, sin límite, sólo nuevos) + Notifs + ESP Player + X-Ray (LTM, seguro) + Ghost + Unload
---//  Fix: brainrots nuevos no quedan transparentes (exclusión por ancestro + des-XRay al detectar)
+--//  ESP LITE+ SECURE v1.4.0
+--//  Brainrots ESP (15s, sin límite, sólo nuevos) + Notifs + ESP Player PRO
+--//  X-Ray (LTM, no revive invisibles, excluye brainrots) + Ghost + Unload
+--//  Robust: anti-doble ejecución, pcall/safeConnect, cola BFS incremental
 --// =========================
 
 -- ===== Seguridad / Anti doble ejecución =====
 local G = getgenv and getgenv() or _G
-G.BRAINROT_ESP_VERSION = "1.3.1-secure"
+G.BRAINROT_ESP_VERSION = "1.4.0-secure"
 G.BRAINROT_ESP_NAME    = "ESP_LITE_PLUS_SECURE"
 
 if G.__BRAINROT_ESP_RUNNING then return end
@@ -87,19 +88,18 @@ local rainbowHue  = 0
 local everMarked  = setmetatable({}, {__mode="k"})   -- instancia ya marcada (no remarcar)
 local activeMarks = setmetatable({}, {__mode="k"})   -- inst -> {hl, createdAt, baseHue}
 
--- NUEVO: raíces de brainrots (para X-Ray exclusion por ancestro)
-local brainrotRoots = setmetatable({}, {__mode="k"}) -- set débil de modelos/baseparts raíz
+-- Raíces de brainrots (para X-Ray exclusion por ancestro)
+local brainrotRoots = setmetatable({}, {__mode="k"})
 local function addBrainrotRoot(root) brainrotRoots[root] = true end
 local function hasBrainrotAncestor(obj)
     local cur = obj
-    for _=1,32 do -- límite de seguridad
+    for _=1,32 do
         if not cur or not isValid(cur) then return false end
         if brainrotRoots[cur] then return true end
         cur = cur.Parent
     end
     return false
 end
--- Limpieza periódica de raíces inválidas
 local function cleanupBrainrotRoots()
     for root,_ in pairs(brainrotRoots) do
         if not isValid(root) then brainrotRoots[root] = nil end
@@ -113,7 +113,7 @@ local function newHighlight(target)
     h.FillTransparency    = 0.45
     h.OutlineTransparency = 0.15
     h.OutlineColor        = Color3.new(1,1,1)
-    h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+    h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop -- atraviesa paredes
     h.Parent = workspace
     return h
 end
@@ -144,7 +144,7 @@ end
 local function enableXRay() xrayEnabled = true;  applyXRay(workspace) end
 local function disableXRay() xrayEnabled = false; restoreXRay(workspace) end
 
--- Cuando un brainrot es detectado, quitarle cualquier LTM aplicado por X-Ray a todas sus partes
+-- Cuando detectamos un brainrot, le quitamos cualquier LTM previo en todas sus partes
 local function unXrayBrainrot(root)
     if not isValid(root) then return end
     local function restoreTree(n)
@@ -157,15 +157,15 @@ local function unXrayBrainrot(root)
     restoreTree(root)
 end
 
--- ===== Detección/Marcado =====
+-- ===== Detección/Marcado Brainrots =====
 local function markOnce(inst)
     if not isValid(inst) or everMarked[inst] then return end
     if not (inst:IsA("Model") or inst:IsA("BasePart")) then return end
     if not targetSet[inst.Name] then return end
 
     everMarked[inst] = true
-    addBrainrotRoot(inst)      -- <- registrar raíz
-    unXrayBrainrot(inst)       -- <- restaurar visibilidad del brainrot y sus partes
+    addBrainrotRoot(inst)
+    unXrayBrainrot(inst)
 
     local hl = newHighlight(inst)
     hl.FillColor = hsv(rainbowHue)
@@ -195,13 +195,13 @@ end
 
 local function startScan() qreset(); qpush(workspace) end
 
--- Nuevos objetos
+-- Nuevos objetos en el mapa
 safeConnect(workspace.DescendantAdded, function(i)
-    -- X-Ray: no aplicar a descendientes de brainrots
+    -- X-Ray: no tocar descendientes de brainrots ni Players/UI
     if xrayEnabled and i:IsA("BasePart") and not shouldIgnore(i) and not hasBrainrotAncestor(i) and not isBrainrotNode(i) then
         setLTM(i, XRAY_TRANSPARENCY)
     end
-    -- ESP: marcar si es brainrot raíz (model/basepart con nombre de la lista)
+    -- ESP: marcar si es brainrot válido
     if isBrainrotNode(i) and targetSet[i.Name] then
         markOnce(i)
     end
@@ -262,39 +262,82 @@ local function toast(msg)
     end)
 end
 
--- ===== Player ESP =====
+-- ===== Player ESP PRO =====
 local linePool = {}
 local function getLine()
     local l = table.remove(linePool)
-    if l then l.Parent = workspace; return l end
+    if l then 
+        l.Parent = workspace
+        return l 
+    end
     l = Instance.new("Part")
     l.Name = "PlayerESPLine"
     l.Anchored = true
     l.CanCollide = false
-    l.Size = Vector3.new(0.08,0.08,1)
-    l.Material = Enum.Material.Neon
-    l.Color = Color3.fromRGB(255,64,64)
+    l.Size = Vector3.new(0.25, 0.25, 1)     -- más gruesa
+    l.Material = Enum.Material.ForceField   -- brillante/visible a través
+    l.Color = Color3.fromRGB(255, 0, 0)     -- rojo intenso
+    l.Transparency = 0.1                    -- efecto glow
     l.Parent = workspace
     return l
 end
 local function freeLine(l) if l then l.Parent=nil table.insert(linePool,l) end end
 
-local playerESPEnabled=false
-local playerESPData={} -- uid -> {p, hl, line}
+local function makeBillboard(targetPlayer)
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "ESPPlayerBillboard"
+    bb.AlwaysOnTop = true
+    bb.Size = UDim2.fromOffset(200, 50)
+    bb.StudsOffsetWorldSpace = Vector3.new(0, 3.2, 0)
+    bb.MaxDistance = 3000
+    local holder = Instance.new("Frame")
+    holder.Name = "Holder"
+    holder.BackgroundColor3 = Color3.fromRGB(25,25,25)
+    holder.BackgroundTransparency = 0.25
+    holder.Size = UDim2.fromScale(1,1)
+    holder.Parent = bb
+    local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0,6); corner.Parent = holder
+    local label = Instance.new("TextLabel")
+    label.Name = "Text"
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.fromScale(1,1)
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamBold
+    label.TextColor3 = Color3.new(1,1,1)
+    label.TextStrokeTransparency = 0.3
+    label.Text = targetPlayer.Name
+    label.Parent = holder
+    return bb, label
+end
 
+local playerESPEnabled=false
+-- uid -> {p, hl, line, bb, lbl}
+local playerESPData={}
+
+local lastPEspUpd = 0
 local function createPlayerESP(p)
     if p==LP or playerESPData[p.UserId] then return end
     local char=p.Character if not char then return end
     local hrp=char:FindFirstChild("HumanoidRootPart") if not hrp then return end
-    local hl=newHighlight(char) hl.FillColor=Color3.new(1,0,0)
-    local line=getLine()
-    playerESPData[p.UserId]={p=p, hl=hl, line=line}
+
+    local hl = newHighlight(char); hl.FillColor=Color3.new(1,0,0)
+    local line = getLine()
+    local bb, lbl = makeBillboard(p)
+    bb.Adornee = hrp
+    bb.Parent = workspace
+
+    playerESPData[p.UserId] = {p=p, hl=hl, line=line, bb=bb, lbl=lbl}
 end
+
 local function clearPlayerESP()
-    for _,d in pairs(playerESPData) do safeDestroy(d.hl) freeLine(d.line) end
+    for _,d in pairs(playerESPData) do
+        safeDestroy(d.hl)
+        freeLine(d.line)
+        safeDestroy(d.bb)
+    end
     table.clear(playerESPData)
 end
-local lastPEspUpd = 0
+
 local function updatePlayerESPLines()
     local now = time()
     if now - lastPEspUpd < 1/PLAYER_LINE_FPS then return end
@@ -304,18 +347,22 @@ local function updatePlayerESPLines()
     local myPos = myHRP.Position
     local toRemove={}
     for uid,d in pairs(playerESPData) do
-        local p=d.p; local hrp=p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-        if not (p and hrp and isValid(d.hl) and isValid(d.line)) then
+        local p=d.p; local char=p and p.Character; local hrp=char and char:FindFirstChild("HumanoidRootPart")
+        if not (p and char and hrp and isValid(d.hl) and isValid(d.line) and isValid(d.bb) and isValid(d.lbl)) then
             table.insert(toRemove, uid)
         else
-            local tp=hrp.Position
-            local dir=tp-myPos
-            d.line.Size=Vector3.new(0.08,0.08,dir.Magnitude)
-            d.line.CFrame=CFrame.lookAt(myPos+dir*0.5,tp)
+            local tpos = hrp.Position
+            local dir  = tpos - myPos
+            local dist = dir.Magnitude
+            d.line.Size   = Vector3.new(0.25, 0.25, dist)
+            d.line.CFrame = CFrame.lookAt(myPos + dir*0.5, tpos)
+            if d.bb.Adornee ~= hrp then d.bb.Adornee = hrp end
+            d.lbl.Text = string.format("%s  •  %dst", p.Name, dist and math.floor(dist) or 0)
         end
     end
     for _,uid in ipairs(toRemove) do
-        local d=playerESPData[uid]; if d then safeDestroy(d.hl) freeLine(d.line) playerESPData[uid]=nil end
+        local d = playerESPData[uid]
+        if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[uid]=nil end
     end
 end
 
@@ -338,7 +385,7 @@ gui.ResetOnSpawn = false
 gui.Parent = playerGui
 
 local f = Instance.new("Frame")
-f.Size = UDim2.new(0,240,0,340)
+f.Size = UDim2.new(0,240,0,380)
 f.Position = UDim2.new(1,-250,0,10)
 f.BackgroundColor3 = Color3.fromRGB(28,28,28)
 f.Active = true
@@ -377,6 +424,17 @@ local pBtn     = makeBtn(164, "ESP Player: OFF")
 local xBtn     = makeBtn(204, "X-RAY MAP: OFF")
 local gBtn     = makeBtn(244, "GHOST (Yo): OFF")
 local uBtn     = makeBtn(284, "UNLOAD / SALIR", Color3.fromRGB(80,80,80))
+
+-- Espaciador visual
+local tip = Instance.new("TextLabel")
+tip.BackgroundTransparency = 1
+tip.TextColor3 = Color3.fromRGB(180,180,180)
+tip.Text = "Linea roja + Nombre/Distancia"
+tip.Font = Enum.Font.Gotham
+tip.TextScaled = true
+tip.Size = UDim2.new(1,-20,0,28)
+tip.Position = UDim2.new(0,10,0,324)
+tip.Parent = f
 
 -- ===== Estado toggles =====
 local espEnabled  = false
@@ -460,7 +518,7 @@ safeConnect(Players.PlayerAdded, function(p)
 end)
 safeConnect(Players.PlayerRemoving, function(p)
     local d = playerESPData[p.UserId]
-    if d then safeDestroy(d.hl) freeLine(d.line) playerESPData[p.UserId]=nil end
+    if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[p.UserId]=nil end
 end)
 
 -- ===== Loop =====
