@@ -1,47 +1,31 @@
 --// =========================
---//  ESP Panel Rainbow + Player ESP
---//  Modo: SIN LÍMITE + solo marcar nuevos + 15s de duración por brainrot
+--//  ESP LITE (sin límite, solo nuevos, 15s) + Player ESP
+--//  Rendimiento: SelectionBox, escaneo incremental con cola, listener DescendantAdded
 --// =========================
 
 -- Servicios
 local Players      = game:GetService("Players")
 local RunService   = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+-- Parámetros
+local MARK_DURATION           = 15      -- segundos por marca
+local RAINBOW_SPEED           = 0.3     -- velocidad animación color
+local SCAN_STEP_BUDGET        = 1200    -- cuántos nodos procesa por Heartbeat
+local CONT_SCAN_PERIOD        = 2       -- segundos (seguridad; ya hay listener)
+local PLAYER_LINE_FPS         = 30      -- Hz de actualización línea jugador
+local MAX_RECURSION_DEPTH     = 14      -- seguridad
+local USE_TWEEN_TOAST         = true
+
 -- Utilidades
-local DEBUG = false
-local function dprint(...) if DEBUG then print(...) end end
-
-local function dictCount(t) local c=0 for _ in pairs(t) do c+=1 end return c end
-
 local function isInstance(x) return typeof(x)=="Instance" end
-local function isObjectValid(obj)
-    return isInstance(obj) and obj.Parent ~= nil and obj:IsDescendantOf(game)
-end
-local function safeDestroy(x)
-    if isInstance(x) and x.Destroy then x:Destroy() end
-end
-
--- Highlight helper (Adornee en el objetivo; parent en workspace)
-local function newHighlightFor(target)
-    local h = Instance.new("Highlight")
-    h.FillTransparency = 0.5
-    h.OutlineTransparency = 0.2
-    h.OutlineColor = Color3.fromRGB(255,255,255)
-    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    h.Adornee = target
-    h.Parent = workspace
-    return h
-end
-
+local function isValid(inst) return isInstance(inst) and inst.Parent ~= nil and inst:IsDescendantOf(game) end
+local function safeDestroy(x) if isInstance(x) and x.Destroy then x:Destroy() end end
 local function hsv(h) return Color3.fromHSV(h,1,1) end
 
--- =======================
--- Objetivos (nombres exactos)
--- =======================
+-- Target names (coincidencia exacta)
 local targetModels = {
     "La Secret Combinasion","Burguro And Fryuro","Los 67","Chillin Chili","Tang Tang Kelentang",
     "Money Money Puggy","Los Primos","Los Tacoritas","La Grande Combinasion","Pot Hotspot",
@@ -54,21 +38,110 @@ local targetModels = {
 }
 local targetSet = {} for _,n in ipairs(targetModels) do targetSet[n]=true end
 
--- =======================
--- Estado ESP de Brainrots
--- =======================
--- everMarked: todo lo que ya se marcó UNA VEZ (no volver a marcarlo)
--- activeMarks: lo actualmente resaltado (con expiración por tiempo)
--- activeMarks[Instance] = {highlight=Highlight, createdAt=number, initialHue=number}
-local everMarked   = setmetatable({}, {__mode="k"})   -- débil por clave (libera si el Instance se destruye)
-local activeMarks  = setmetatable({}, {__mode="k"})
+-- Estado brainrots
+-- everMarked: recuerda instancias ya marcadas alguna vez (no volver a marcarlas).
+-- activeMarks[inst] = { sb=SelectionBox, createdAt=t, baseHue=h }
+local everMarked  = setmetatable({}, {__mode="k"})
+local activeMarks = setmetatable({}, {__mode="k"})
+local rainbowHue  = 0
 
-local MARK_DURATION = 15 -- segundos
-local rainbowHue    = 0
-local rainbowSpeed  = 0.5
+-- Cola de escaneo incremental (BFS)
+local scanQueue = {}
+local queueHead, queueTail = 1, 0
+local function qpush(x) queueTail+=1; scanQueue[queueTail]=x end
+local function qpop() if queueHead<=queueTail then local v=scanQueue[queueHead]; scanQueue[queueHead]=nil; queueHead+=1; return v end end
+local function qreset() for i=queueHead,queueTail do scanQueue[i]=nil end; queueHead,queueTail=1,0 end
+
+-- SelectionBox liviano
+local function newSelectionFor(target)
+    local sb = Instance.new("SelectionBox")
+    sb.LineThickness = 0.03
+    sb.Color3 = hsv(rainbowHue)
+    sb.Adornee = target -- acepta Model o BasePart
+    sb.Archivable = false
+    sb.Parent = workspace
+    return sb
+end
+
+-- Marcar una instancia una sola vez (si coincide y nunca fue marcada)
+local function markOnce(inst)
+    if not isValid(inst) then return end
+    if not (inst:IsA("Model") or inst:IsA("BasePart")) then return end
+    if not targetSet[inst.Name] then return end
+    if everMarked[inst] then return end
+    everMarked[inst] = true
+
+    local sb = newSelectionFor(inst)
+    activeMarks[inst] = { sb=sb, createdAt=time(), baseHue=rainbowHue }
+end
+
+-- Escaneo incremental: procesa nodos de la cola hasta agotar presupuesto
+local function processScanStep()
+    local budget = SCAN_STEP_BUDGET
+    while budget>0 do
+        local node = qpop()
+        if not node then break end
+        if isValid(node) then
+            -- marcar si es target y nunca marcado
+            if targetSet[node.Name] and (node:IsA("Model") or node:IsA("BasePart")) then
+                if not everMarked[node] then
+                    markOnce(node)
+                end
+            end
+            -- encolar hijos
+            local children = node:GetChildren()
+            for _,ch in ipairs(children) do
+                if isValid(ch) then qpush(ch) end
+            end
+        end
+        budget-=1
+    end
+end
+
+-- Escaneo completo inicial: llenar cola con workspace
+local function startFullScan()
+    qreset()
+    qpush(workspace)
+end
+
+-- Listener instantáneo: marca nuevos al aparecer
+local function onDescendantAdded(inst)
+    if not isValid(inst) then return end
+    if not targetSet[inst.Name] then return end
+    -- model/basepart, marcar si nunca fue marcado
+    if inst:IsA("Model") or inst:IsA("BasePart") then
+        if not everMarked[inst] then
+            markOnce(inst)
+        end
+    end
+end
+
+-- Limpia marks expirados o inválidos
+local function cleanupExpired()
+    local now = time()
+    for inst, data in pairs(activeMarks) do
+        local expired = (now - data.createdAt) >= MARK_DURATION
+        if expired or not isValid(inst) or not isValid(data.sb) then
+            if data.sb then safeDestroy(data.sb) end
+            activeMarks[inst] = nil
+        end
+    end
+end
+
+-- Arcoíris activo
+local function updateColors()
+    for inst, data in pairs(activeMarks) do
+        local sb = data.sb
+        if isValid(sb) then
+            local t = (time()-data.createdAt)*RAINBOW_SPEED
+            local hue = (data.baseHue + t)%1
+            sb.Color3 = hsv(hue)
+        end
+    end
+end
 
 -- =======================
--- Player ESP
+-- Player ESP (lite)
 -- =======================
 local linePool = {}
 local function acquireLine()
@@ -76,9 +149,9 @@ local function acquireLine()
     if line then line.Parent = workspace; return line end
     line = Instance.new("Part")
     line.Name = "PlayerESPLine"
-    line.Size = Vector3.new(0.1,0.1,1)
+    line.Size = Vector3.new(0.08,0.08,1)
     line.Material = Enum.Material.Neon
-    line.BrickColor = BrickColor.new("Really red")
+    line.Color = Color3.fromRGB(255, 64, 64)
     line.Anchored = true
     line.CanCollide = false
     line.Parent = workspace
@@ -86,379 +159,261 @@ local function acquireLine()
 end
 local function releaseLine(line) if line then line.Parent=nil table.insert(linePool,line) end end
 
-local playerESPData = {} -- userId -> {targetPlayer, highlight, line}
+local playerESPEnabled=false
+local playerESPData = {} -- uid -> {targetPlayer, sb=SelectionBox, line}
 
-local function createPlayerESP(targetPlayer)
-    if targetPlayer == player then return end
-    local char = targetPlayer.Character
+local function createPlayerESP(p)
+    if p==player then return end
+    local char = p.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-    local hl = newHighlightFor(char)
-    hl.FillColor = Color3.fromRGB(255,0,0)
+    if playerESPData[p.UserId] then return end
+    local sb = Instance.new("SelectionBox")
+    sb.LineThickness = 0.03
+    sb.Color3 = Color3.fromRGB(255,0,0)
+    sb.Adornee = char
+    sb.Parent = workspace
     local line = acquireLine()
-    playerESPData[targetPlayer.UserId] = {targetPlayer=targetPlayer, highlight=hl, line=line}
+    playerESPData[p.UserId] = {targetPlayer=p, sb=sb, line=line}
 end
 
-local function updatePlayerESPLines()
+local function cleanupPlayerESP()
+    for uid, d in pairs(playerESPData) do
+        safeDestroy(d.sb)
+        releaseLine(d.line)
+        playerESPData[uid]=nil
+    end
+end
+
+local lastPEspUpd = 0
+local function updatePlayerESPLines(dt)
+    local now = time()
+    if now - lastPEspUpd < 1/PLAYER_LINE_FPS then return end
+    lastPEspUpd = now
+
     local myChar = player.Character
-    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myHRP then return end
     local myPos = myHRP.Position
-    local toRemove = {}
-    for uid, esp in pairs(playerESPData) do
-        local p = esp.targetPlayer
-        local char = p and p.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not (p and char and hrp and esp.line and isObjectValid(esp.line)) then
+
+    local toRemove={}
+    for uid, d in pairs(playerESPData) do
+        local p   = d.targetPlayer
+        local chr = p and p.Character
+        local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+        if not (p and chr and hrp and isValid(d.line) and isValid(d.sb)) then
             table.insert(toRemove, uid)
         else
             local tpos = hrp.Position
             local dir  = tpos - myPos
             local dist = dir.Magnitude
             local mid  = myPos + dir*0.5
-            local line = esp.line
-            line.Size  = Vector3.new(0.1,0.1,dist)
+            local line = d.line
+            line.Size  = Vector3.new(0.08,0.08,dist)
             line.CFrame = CFrame.lookAt(mid, tpos)
         end
     end
     for _,uid in ipairs(toRemove) do
         local d = playerESPData[uid]
-        if d then
-            safeDestroy(d.highlight)
-            releaseLine(d.line)
-            playerESPData[uid] = nil
-        end
+        if d then safeDestroy(d.sb) releaseLine(d.line) playerESPData[uid]=nil end
     end
 end
 
-local function cleanupPlayerESP()
-    for uid,esp in pairs(playerESPData) do
-        safeDestroy(esp.highlight)
-        releaseLine(esp.line)
-        playerESPData[uid] = nil
-    end
-end
-
-local function updatePlayerESP()
+local function refreshPlayerESPForAll()
     for _,p in ipairs(Players:GetPlayers()) do
-        if p~=player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-            if not playerESPData[p.UserId] then
-                createPlayerESP(p)
-            end
-        end
+        if p~=player then createPlayerESP(p) end
     end
 end
 
 -- =======================
--- GUI
+-- GUI LITE
 -- =======================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "ESPPanel"
-screenGui.Parent = playerGui
+screenGui.Name = "ESPPanelLite"
 screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
 
-local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainPanel"
-mainFrame.Size = UDim2.new(0, 200, 0, 200)
-mainFrame.Position = UDim2.new(1, -210, 0, 10)
-mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-mainFrame.BorderSizePixel = 0
-mainFrame.Active = true
-mainFrame.Draggable = true
-mainFrame.Parent = screenGui
-do local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,8) c.Parent=mainFrame end
-
--- Persistencia de posición
-local function savePos()
-    local p = mainFrame.Position
-    playerGui:SetAttribute("ESPPanelPosXS", p.X.Scale)
-    playerGui:SetAttribute("ESPPanelPosXO",  p.X.Offset)
-    playerGui:SetAttribute("ESPPanelPosYS", p.Y.Scale)
-    playerGui:SetAttribute("ESPPanelPosYO",  p.Y.Offset)
-end
-local function loadPos()
-    local xs=playerGui:GetAttribute("ESPPanelPosXS")
-    local xo=playerGui:GetAttribute("ESPPanelPosXO")
-    local ys=playerGui:GetAttribute("ESPPanelPosYS")
-    local yo=playerGui:GetAttribute("ESPPanelPosYO")
-    if typeof(xs)=="number" and typeof(xo)=="number" and typeof(ys)=="number" and typeof(yo)=="number" then
-        mainFrame.Position = UDim2.new(xs,xo,ys,yo)
-    end
-end
-loadPos()
-mainFrame:GetPropertyChangedSignal("Position"):Connect(savePos)
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Size = UDim2.new(0,200,0,180)
+main.Position = UDim2.new(1,-210,0,10)
+main.BackgroundColor3 = Color3.fromRGB(28,28,28)
+main.Active = true
+main.Draggable = true
+main.Parent = screenGui
+do local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,8) c.Parent=main end
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1,0,0,30)
-title.BackgroundColor3 = Color3.fromRGB(50,50,50)
-title.Text = "ESP Panel"
+title.Size = UDim2.new(1,0,0,28)
+title.BackgroundColor3 = Color3.fromRGB(45,45,45)
+title.Text = "ESP LITE"
 title.TextColor3 = Color3.new(1,1,1)
 title.TextScaled = true
 title.Font = Enum.Font.GothamBold
-title.Parent = mainFrame
+title.Parent = main
 do local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,8) c.Parent=title end
 
-local function newBtn(name, y, text, bg)
+local function btn(y, text)
     local b = Instance.new("TextButton")
-    b.Name=name
-    b.Size=UDim2.new(1,-20,0,30)
-    b.Position=UDim2.new(0,10,0,y)
-    b.BackgroundColor3=bg
-    b.Text=text
-    b.TextColor3=Color3.new(1,1,1)
-    b.TextScaled=true
-    b.Font=Enum.Font.Gotham
-    b.Parent=mainFrame
-    local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,5) c.Parent=b
+    b.Size = UDim2.new(1,-20,0,30)
+    b.Position = UDim2.new(0,10,0,y)
+    b.BackgroundColor3 = Color3.fromRGB(255,60,60)
+    b.Text = text
+    b.TextColor3 = Color3.new(1,1,1)
+    b.TextScaled = true
+    b.Font = Enum.Font.Gotham
+    b.Parent = main
+    local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,6) c.Parent=b
     return b
 end
 
 local espEnabled=false
-local notifEnabled=false
 local contEnabled=true
-local playerESPEnabled=false
 
-local espBtn        = newBtn("ESPButton",         40,"ESP: OFF",              Color3.fromRGB(255,50,50))
-local notifBtn      = newBtn("NotifButton",       80,"Notificaciones: OFF",   Color3.fromRGB(255,50,50))
-local contBtn       = newBtn("ContinuousButton", 120,"Búsqueda Continua: ON", Color3.fromRGB(50,255,50))
-local playerESPBtn  = newBtn("PlayerESPButton",  160,"ESP Player: OFF",       Color3.fromRGB(255,50,50))
+local espBtn   = btn(40,  "ESP: OFF")
+local contBtn  = btn(80,  "Búsqueda Continua: ON")
+local pEspBtn  = btn(120, "ESP Player: OFF")
 
--- Notificación simple (visual)
-local function showToast(text)
+-- Toast minimal
+local function toast(msg)
     local gui = Instance.new("ScreenGui")
-    gui.Name = "NotificationToast"
-    gui.Parent = playerGui
-
-    local f = Instance.new("Frame")
-    f.Size = UDim2.new(0,350,0,90)
-    f.Position = UDim2.new(0.5,-175,1,-100)
-    f.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    gui.Name="Toast"
+    gui.Parent=playerGui
+    local f=Instance.new("Frame")
+    f.Size=UDim2.new(0,320,0,85)
+    f.Position=UDim2.new(0.5,-160,1,-95)
+    f.BackgroundColor3=Color3.fromRGB(40,40,40)
     f.BorderSizePixel=0
-    f.Parent = gui
-    local c = Instance.new("UICorner") c.CornerRadius=UDim.new(0,10) c.Parent=f
-
-    local lbl = Instance.new("TextLabel")
-    lbl.BackgroundTransparency=1
-    lbl.Size=UDim2.new(1,-20,1,-20)
-    lbl.Position=UDim2.new(0,10,0,10)
-    lbl.Text=text
-    lbl.TextScaled=true
-    lbl.TextColor3 = Color3.new(1,1,1)
-    lbl.Font = Enum.Font.Gotham
-    lbl.Parent = f
-
-    f.Position = UDim2.new(0.5,-175,1,0)
-    TweenService:Create(f, TweenInfo.new(0.4, Enum.EasingStyle.Back), {Position=UDim2.new(0.5,-175,1,-100)}):Play()
+    f.Parent=gui
+    local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,10) c.Parent=f
+    local l=Instance.new("TextLabel")
+    l.BackgroundTransparency=1
+    l.Size=UDim2.new(1,-20,1,-20)
+    l.Position=UDim2.new(0,10,0,10)
+    l.Text=msg
+    l.TextScaled=true
+    l.TextColor3=Color3.new(1,1,1)
+    l.Font=Enum.Font.Gotham
+    l.Parent=f
+    if USE_TWEEN_TOAST then
+        f.Position=UDim2.new(0.5,-160,1,0)
+        TweenService:Create(f,TweenInfo.new(0.35,Enum.EasingStyle.Back),{Position=UDim2.new(0.5,-160,1,-95)}):Play()
+    end
     task.spawn(function()
-        task.wait(4)
-        local tw = TweenService:Create(f, TweenInfo.new(0.35), {Position=UDim2.new(0.5,-175,1,0)})
+        task.wait(3.5)
+        local tw = TweenService:Create(f,TweenInfo.new(0.3),{Position=UDim2.new(0.5,-160,1,0)})
         tw:Play()
         tw.Completed:Once(function() safeDestroy(gui) end)
     end)
 end
 
--- =======================
--- Lógica de marcado SIN LÍMITE + solo nuevos + 15s
--- =======================
-
--- Marca una instancia (si no fue marcada antes) y programa su expiración a 15s
-local function markInstanceOnce(inst)
-    if not isObjectValid(inst) then return end
-    if everMarked[inst] then return end -- ya fue marcada alguna vez
-    everMarked[inst] = true
-
-    local hl = newHighlightFor(inst)
-    hl.FillColor = hsv(rainbowHue)
-
-    activeMarks[inst] = {
-        highlight  = hl,
-        createdAt  = time(),
-        initialHue = rainbowHue
-    }
-end
-
--- Escanea TODO el mapa y marca SOLO los que aún no se han marcado nunca
-local VISIT_QUOTA = 800 -- solo influye en rendimiento; NO limita cantidad
-local function scanAndMarkNew()
-    local visited = 0
-    local function search(container, depth)
-        if depth > 12 then return end
-        for _,child in ipairs(container:GetChildren()) do
-            if isObjectValid(child) then
-                visited += 1
-                if visited % VISIT_QUOTA == 0 then task.wait() end
-
-                if targetSet[child.Name] and (child:IsA("Model") or child:IsA("BasePart")) then
-                    markInstanceOnce(child)
-                end
-                if child:IsA("Folder") or child:IsA("Model") then
-                    search(child, depth+1)
-                end
-            end
-        end
-    end
-    search(workspace, 0)
-end
-
--- Quita highlights que ya pasaron de 15s o que quedaron inválidos
-local function expireAndCleanupMarks()
-    local now = time()
-    local removed = 0
-    for inst, data in pairs(activeMarks) do
-        local invalid = (not isObjectValid(inst)) or (not data.highlight) or (not isObjectValid(data.highlight))
-        local expired = (not invalid) and (now - data.createdAt >= MARK_DURATION)
-        if invalid or expired then
-            if data.highlight then safeDestroy(data.highlight) end
-            activeMarks[inst] = nil
-            removed += 1
-        end
-    end
-    if removed>0 then dprint("🗑️ Highlights removidos:", removed) end
-end
-
--- Actualiza colores arcoíris en lo actualmente activo
-local function updateRainbowActive()
-    for inst, data in pairs(activeMarks) do
-        local hl = data.highlight
-        if hl and isObjectValid(hl) then
-            local hue = (data.initialHue + (time()-data.createdAt)*rainbowSpeed) % 1
-            hl.FillColor = hsv(hue)
-        end
-    end
-end
-
--- Primera pasada: marca TODO lo que existe, una sola vez
-local function initialFullScan()
-    scanAndMarkNew()
-    dprint("✅ Initial full scan: everMarked =", dictCount(everMarked), "active =", dictCount(activeMarks))
-end
-
--- En búsqueda continua: SOLO busca nuevos (no re-marca viejos)
-local lastScanAt = 0
-local scanInterval = 2 -- s
-local function continuousScan()
-    if not contEnabled then return end
-    local now = time()
-    if now - lastScanAt < scanInterval then return end
-    lastScanAt = now
-    scanAndMarkNew()
-end
-
--- =======================
--- Eventos GUI
--- =======================
+-- Botones
 espBtn.MouseButton1Click:Connect(function()
     espEnabled = not espEnabled
     if espEnabled then
         espBtn.Text = "ESP: ON"
-        espBtn.BackgroundColor3 = Color3.fromRGB(50,255,50)
-        -- arranque: marcar todo lo que exista (solo nuevos)
-        initialFullScan()
-        showToast("ESP activado: marcando brainrots (15s cada uno)")
+        espBtn.BackgroundColor3 = Color3.fromRGB(60,200,60)
+        startFullScan()         -- arranca cola completa (workspace entero)
+        toast("ESP activado (15s por brainrot)")
     else
         espBtn.Text = "ESP: OFF"
-        espBtn.BackgroundColor3 = Color3.fromRGB(255,50,50)
-        -- Apaga highlights activos (everMarked se mantiene para no re-marcar)
-        for inst,data in pairs(activeMarks) do
-            safeDestroy(data.highlight)
+        espBtn.BackgroundColor3 = Color3.fromRGB(255,60,60)
+        for inst, data in pairs(activeMarks) do
+            safeDestroy(data.sb)
             activeMarks[inst] = nil
         end
-        showToast("ESP desactivado")
+        toast("ESP desactivado")
     end
-end)
-
-notifBtn.MouseButton1Click:Connect(function()
-    notifEnabled = not notifEnabled
-    notifBtn.Text = notifEnabled and "Notificaciones: ON" or "Notificaciones: OFF"
-    notifBtn.BackgroundColor3 = notifEnabled and Color3.fromRGB(50,255,50) or Color3.fromRGB(255,50,50)
 end)
 
 contBtn.MouseButton1Click:Connect(function()
     contEnabled = not contEnabled
     contBtn.Text = contEnabled and "Búsqueda Continua: ON" or "Búsqueda Continua: OFF"
-    contBtn.BackgroundColor3 = contEnabled and Color3.fromRGB(50,255,50) or Color3.fromRGB(255,50,50)
+    contBtn.BackgroundColor3 = contEnabled and Color3.fromRGB(60,200,60) or Color3.fromRGB(255,60,60)
 end)
 
-playerESPBtn.MouseButton1Click:Connect(function()
+pEspBtn.MouseButton1Click:Connect(function()
     playerESPEnabled = not playerESPEnabled
     if playerESPEnabled then
-        playerESPBtn.Text = "ESP Player: ON"
-        playerESPBtn.BackgroundColor3 = Color3.fromRGB(50,255,50)
-        updatePlayerESP()
+        pEspBtn.Text = "ESP Player: ON"
+        pEspBtn.BackgroundColor3 = Color3.fromRGB(60,200,60)
+        refreshPlayerESPForAll()
     else
-        playerESPBtn.Text = "ESP Player: OFF"
-        playerESPBtn.BackgroundColor3 = Color3.fromRGB(255,50,50)
+        pEspBtn.Text = "ESP Player: OFF"
+        pEspBtn.BackgroundColor3 = Color3.fromRGB(255,60,60)
         cleanupPlayerESP()
     end
 end)
 
--- =======================
--- Eventos Jugadores
--- =======================
+-- Eventos jugadores (lite)
 Players.PlayerAdded:Connect(function(p)
     if playerESPEnabled then
-        local function onChar(_)
+        local function onChar()
             task.wait(0.2)
-            local old = playerESPData[p.UserId]
-            if old then safeDestroy(old.highlight) releaseLine(old.line) playerESPData[p.UserId]=nil end
+            local d = playerESPData[p.UserId]
+            if d then safeDestroy(d.sb) releaseLine(d.line) playerESPData[p.UserId]=nil end
             createPlayerESP(p)
         end
-        if p.Character then onChar(p.Character) end
+        if p.Character then onChar() end
         p.CharacterAdded:Connect(onChar)
-    end
-    if espEnabled and notifEnabled then
-        showToast("🚨 "..p.Name.." se unió")
     end
 end)
 
 Players.PlayerRemoving:Connect(function(p)
     local d = playerESPData[p.UserId]
-    if d then safeDestroy(d.highlight) releaseLine(d.line) playerESPData[p.UserId]=nil end
+    if d then safeDestroy(d.sb) releaseLine(d.line) playerESPData[p.UserId]=nil end
 end)
 
 for _,p in ipairs(Players:GetPlayers()) do
     if p~=player then
-        p.CharacterAdded:Connect(function(_)
+        p.CharacterAdded:Connect(function()
             if playerESPEnabled then
                 task.wait(0.2)
                 local d = playerESPData[p.UserId]
-                if d then safeDestroy(d.highlight) releaseLine(d.line) playerESPData[p.UserId]=nil end
+                if d then safeDestroy(d.sb) releaseLine(d.line) playerESPData[p.UserId]=nil end
                 createPlayerESP(p)
             end
         end)
     end
 end
 
--- =======================
--- Loop principal
--- =======================
-local lastPlayerESPUpd = 0
-RunService.Heartbeat:Connect(function()
-    rainbowHue = (rainbowHue + 0.02) % 1
-
-    if espEnabled then
-        -- actualizar colores y expiraciones
-        updateRainbowActive()
-        expireAndCleanupMarks()
-        -- marcar solo NUEVOS en continuo
-        continuousScan()
-    end
-
-    if playerESPEnabled then
-        local now = time()
-        if now - lastPlayerESPUpd >= 1/33 then
-            lastPlayerESPUpd = now
-            updatePlayerESPLines()
+-- Listener instantáneo para nuevos brainrots
+workspace.DescendantAdded:Connect(function(inst)
+    if not espEnabled then return end
+    -- Solo marcar nuevos (si ya fue marcado alguna vez, no se vuelve a marcar)
+    if targetSet[inst.Name] and (inst:IsA("Model") or inst:IsA("BasePart")) then
+        if not everMarked[inst] then
+            markOnce(inst)
         end
     end
 end)
 
--- =======================
--- Debug helpers
--- =======================
-_G.setScanInterval = function(s) scanInterval = tonumber(s) or 2 end
-_G.toggleDebug = function() DEBUG = not DEBUG print("DEBUG:",DEBUG) end
+-- Loop principal
+local lastContScan = 0
+RunService.Heartbeat:Connect(function(dt)
+    rainbowHue = (rainbowHue + 0.02) % 1
 
-print("🚀 ESP Panel listo (sin límite, 15s por brainrot, solo nuevos en continuo)")
-print("🎯 Nombres válidos:", dictCount(targetSet))
+    if espEnabled then
+        -- procesar cola incremental hasta cubrir TODO
+        processScanStep()
+        -- animación color + expiraciones
+        updateColors()
+        cleanupExpired()
+        -- búsqueda continua (seguridad por si algo no triggereó el listener)
+        local now = time()
+        if contEnabled and (now - lastContScan) >= CONT_SCAN_PERIOD then
+            lastContScan = now
+            -- solo encolar raíz si la cola está vacía, para no duplicar
+            if queueHead>queueTail then
+                qpush(workspace)
+            end
+        end
+    end
+
+    if playerESPEnabled then
+        updatePlayerESPLines(dt)
+    end
+end)
+
+print("✅ ESP LITE cargado (SelectionBox, sin límite, 15s por brainrot, solo nuevos)")
