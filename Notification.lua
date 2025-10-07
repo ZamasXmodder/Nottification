@@ -1,15 +1,17 @@
 --// =========================
---//  ESP Panel Rainbow + Player ESP (versión optimizada)
---//  Mejoras: time()/task.*, pooling de líneas, Highlight.Adornee, validaciones seguras,
---//  consolidación de eventos, logs opcionales, GUI arrastrable, sonido único, dedup de targets.
+--//  ESP Panel Rainbow + Player ESP (COMPLETO | SIN LÍMITE)
+--//  Cambios clave:
+--//   - Marca TODOS los brainrots coincidentes en todo el mapa.
+--//   - Sin expiración: los highlights se mantienen mientras ESP esté ON.
+--//   - Búsqueda continua vuelve a marcar cualquier brainrot que se haya quedado sin highlight.
+--//   - Se respetan solo los nombres definidos (coincidencia exacta).
+--//   - Pooling de líneas, Highlight.Adornee, eventos consolidados, GUI arrastrable, time()/task.*.
 --// =========================
 
 --// Servicios
 local Players            = game:GetService("Players")
 local RunService         = game:GetService("RunService")
-local SoundService       = game:GetService("SoundService")
 local TweenService       = game:GetService("TweenService")
-local UserInputService   = game:GetService("UserInputService")
 
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -20,26 +22,23 @@ local playerGui = player:WaitForChild("PlayerGui")
 local DEBUG = false
 local function dprint(...) if DEBUG then print(...) end end
 
--- Conteo seguro de diccionarios
 local function dictCount(t)
     local c = 0
     for _ in pairs(t) do c += 1 end
     return c
 end
 
--- Validación robusta de instancia viva
 local function isObjectValid(obj)
     return typeof(obj) == "Instance" and obj.Parent ~= nil and obj:IsDescendantOf(game)
 end
 
--- Son utilidades para destruir sin error
 local function safeDestroy(x)
     if x and typeof(x) == "Instance" and x.Destroy then
         x:Destroy()
     end
 end
 
--- Pool de líneas para reducir GC/instancias
+-- Pool de líneas para Player ESP
 local linePool = {}
 local function acquireLine()
     local line = table.remove(linePool)
@@ -57,14 +56,13 @@ local function acquireLine()
     line.Parent = workspace
     return line
 end
-
 local function releaseLine(line)
     if not line then return end
     line.Parent = nil
     table.insert(linePool, line)
 end
 
--- Highlight fábrica (mejor con Adornee y parent en workspace)
+-- Highlight con Adornee (más estable)
 local function newHighlightFor(target)
     local h = Instance.new("Highlight")
     h.FillTransparency = 0.5
@@ -76,13 +74,12 @@ local function newHighlightFor(target)
     return h
 end
 
--- Genera color rainbow
 local function getRainbowColor(hue)
     return Color3.fromHSV(hue, 1, 1)
 end
 
 -- =======================
--- Objetivos (deduplicados)
+-- Objetivos (nombres exactos)
 -- =======================
 local targetModels = {
     "La Secret Combinasion",
@@ -106,7 +103,6 @@ local targetModels = {
     "Chicleteira Bicicleteira",
     "Spaghetti Tualetti", 
     "Esok Sekolah",
-    -- "La Grande Combinasion", -- duplicado
     "Los Chicleteiras",
     "67",
     "Los Combinasionas",
@@ -122,7 +118,6 @@ local targetModels = {
     "Dragon Cannelloni",
     "Celularcini Viciosini"
 }
-
 local targetSet = {}
 for _, name in ipairs(targetModels) do
     targetSet[name] = true
@@ -135,17 +130,17 @@ local espEnabled              = false
 local notificationsEnabled    = false
 local playerESPEnabled        = false
 
-local espLines        = {}     -- { {highlight, timestamp, targetName, uniqueId, targetObject, initialHue}, ... }
-local trackedPlayers  = {}     -- userId => true
-local playerESPData   = {}     -- userId => { targetPlayer, highlight, line, timestamp }
+-- Ahora usamos un MAPA de marcas activas por instancia (sin expiración por tiempo)
+-- activeMarks[Instance] = { highlight=Highlight, createdAt=time(), initialHue=number, targetName=string }
+local activeMarks     = {}
 
--- Memoria anti redetección
-local detectedBrainrots = {}   -- memoryId => {timestamp, name}
+-- Player ESP
+local playerESPData   = {}     -- userId => { targetPlayer, highlight, line, timestamp }
 
 -- Efecto rainbow
 local rainbowHue = 0
 
--- Búsqueda continua
+-- Búsqueda continua (suma marcas que faltan y re-marca si algo se perdió)
 local continuousSearchEnabled = true
 local lastSearchTime = 0
 local searchInterval = 2 -- segundos
@@ -172,7 +167,7 @@ local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 8)
 corner.Parent = mainFrame
 
--- Persistencia simple de posición (en atributos: 4 números)
+-- Persistencia simple de posición
 local function savePanelPos()
     local pos = mainFrame.Position
     playerGui:SetAttribute("ESPPanelPosXS", pos.X.Scale)
@@ -180,7 +175,6 @@ local function savePanelPos()
     playerGui:SetAttribute("ESPPanelPosYS", pos.Y.Scale)
     playerGui:SetAttribute("ESPPanelPosYO",  pos.Y.Offset)
 end
-
 local function loadPanelPos()
     local xs = playerGui:GetAttribute("ESPPanelPosXS")
     local xo = playerGui:GetAttribute("ESPPanelPosXO")
@@ -209,202 +203,112 @@ titleCorner.CornerRadius = UDim.new(0, 8)
 titleCorner.Parent = titleLabel
 
 -- Botones
-local espButton = Instance.new("TextButton")
-espButton.Name = "ESPButton"
-espButton.Size = UDim2.new(1, -20, 0, 30)
-espButton.Position = UDim2.new(0, 10, 0, 40)
-espButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-espButton.Text = "ESP: OFF"
-espButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-espButton.TextScaled = true
-espButton.Font = Enum.Font.Gotham
-espButton.Parent = mainFrame
+local function newButton(name, y, text, color)
+    local b = Instance.new("TextButton")
+    b.Name = name
+    b.Size = UDim2.new(1, -20, 0, 30)
+    b.Position = UDim2.new(0, 10, 0, y)
+    b.BackgroundColor3 = color
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(255, 255, 255)
+    b.TextScaled = true
+    b.Font = Enum.Font.Gotham
+    b.Parent = mainFrame
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 5)
+    c.Parent = b
+    return b
+end
 
-local espCorner = Instance.new("UICorner")
-espCorner.CornerRadius = UDim.new(0, 5)
-espCorner.Parent = espButton
+local espButton         = newButton("ESPButton",          40,  "ESP: OFF",                Color3.fromRGB(255, 50, 50))
+local notifButton       = newButton("NotifButton",        80,  "Notificaciones: OFF",     Color3.fromRGB(255, 50, 50))
+local continuousButton  = newButton("ContinuousButton",   120, "Búsqueda Continua: ON",   Color3.fromRGB(50, 255, 50))
+local playerESPButton   = newButton("PlayerESPButton",    160, "ESP Player: OFF",         Color3.fromRGB(255, 50, 50))
 
-local notifButton = Instance.new("TextButton")
-notifButton.Name = "NotifButton"
-notifButton.Size = UDim2.new(1, -20, 0, 30)
-notifButton.Position = UDim2.new(0, 10, 0, 80)
-notifButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-notifButton.Text = "Notificaciones: OFF"
-notifButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-notifButton.TextScaled = true
-notifButton.Font = Enum.Font.Gotham
-notifButton.Parent = mainFrame
+-- =======================
+-- Notificación (toast sencillo)
+-- =======================
+local function showNotificationToast(playerName, models)
+    local toastGui = Instance.new("ScreenGui")
+    toastGui.Name = "NotificationToast"
+    toastGui.Parent = playerGui
 
-local notifCorner = Instance.new("UICorner")
-notifCorner.CornerRadius = UDim.new(0, 5)
-notifCorner.Parent = notifButton
+    local toastFrame = Instance.new("Frame")
+    toastFrame.Size = UDim2.new(0, 350, 0, 100)
+    toastFrame.Position = UDim2.new(0.5, -175, 1, -180)
+    toastFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    toastFrame.BorderSizePixel = 0
+    toastFrame.Parent = toastGui
 
-local continuousButton = Instance.new("TextButton")
-continuousButton.Name = "ContinuousButton"
-continuousButton.Size = UDim2.new(1, -20, 0, 30)
-continuousButton.Position = UDim2.new(0, 10, 0, 120)
-continuousButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
-continuousButton.Text = "Búsqueda Continua: ON"
-continuousButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-continuousButton.TextScaled = true
-continuousButton.Font = Enum.Font.Gotham
-continuousButton.Parent = mainFrame
+    local toastCorner = Instance.new("UICorner")
+    toastCorner.CornerRadius = UDim.new(0, 10)
+    toastCorner.Parent = toastFrame
 
-local continuousCorner = Instance.new("UICorner")
-continuousCorner.CornerRadius = UDim.new(0, 5)
-continuousCorner.Parent = continuousButton
+    local modelsText = (models and #models > 0) and table.concat(models, ", ") or "Ningún brainrot detectado"
 
-local playerESPButton = Instance.new("TextButton")
-playerESPButton.Name = "PlayerESPButton"
-playerESPButton.Size = UDim2.new(1, -20, 0, 30)
-playerESPButton.Position = UDim2.new(0, 10, 0, 160)
-playerESPButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-playerESPButton.Text = "ESP Player: OFF"
-playerESPButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-playerESPButton.TextScaled = true
-playerESPButton.Font = Enum.Font.Gotham
-playerESPButton.Parent = mainFrame
+    local toastText = Instance.new("TextLabel")
+    toastText.Size = UDim2.new(1, -20, 1, -20)
+    toastText.Position = UDim2.new(0, 10, 0, 10)
+    toastText.BackgroundTransparency = 1
+    toastText.Text = "🚨 " .. playerName .. " se unió!\n🎯 Brainrots: " .. modelsText
+    toastText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toastText.TextScaled = true
+    toastText.Font = Enum.Font.Gotham
+    toastText.Parent = toastFrame
 
-local playerESPCorner = Instance.new("UICorner")
-playerESPCorner.CornerRadius = UDim.new(0, 5)
-playerESPCorner.Parent = playerESPButton
+    toastFrame.Position = UDim2.new(0.5, -175, 1, 0)
+    local tweenIn = TweenService:Create(toastFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back), {Position = UDim2.new(0.5, -175, 1, -180)})
+    tweenIn:Play()
 
--- Sonido único de notificación
-local notifSound = Instance.new("Sound")
-notifSound.SoundId = "rbxassetid://77665577458181"
-notifSound.Volume = 0.7
-notifSound.Parent = screenGui
-
-local function playNotificationSound()
-    local ok, err = pcall(function() notifSound:Play() end)
-    if not ok then dprint("Sound error:", err) end
+    task.spawn(function()
+        task.wait(5)
+        local tweenOut = TweenService:Create(toastFrame, TweenInfo.new(0.5), {Position = UDim2.new(0.5, -175, 1, 0)})
+        tweenOut:Play()
+        tweenOut.Completed:Once(function()
+            safeDestroy(toastGui)
+        end)
+    end)
 end
 
 -- =======================
--- Memoria anti-spam/duplicados
+-- ESP de Objetos (brainrots) — SIN EXPIRACIÓN
 -- =======================
-local function getObjectMemoryId(targetObject)
-    if targetObject:IsA("Model") then
-        local prim = targetObject.PrimaryPart or targetObject:FindFirstChildOfClass("BasePart")
-        if prim then
-            return tostring(targetObject.Name) .. "_" .. tostring(prim.Position)
-        end
-    elseif targetObject:IsA("BasePart") then
-        return tostring(targetObject.Name) .. "_" .. tostring(targetObject.Position)
+local rainbowSpeed = 0.5 -- velocidad del arcoíris por highlight
+
+local function ensureMark(targetObject)
+    -- crea o asegura un highlight activo para targetObject
+    local data = activeMarks[targetObject]
+    if data and data.highlight and isObjectValid(data.highlight) then
+        return data -- ya marcado
     end
-    return tostring(targetObject)
-end
-
-local function wasRecentlyDetected(targetObject)
-    local id = getObjectMemoryId(targetObject)
-    local now = time()
-    local data = detectedBrainrots[id]
-    if data then
-        if now - data.timestamp > 25 then
-            detectedBrainrots[id] = nil
-            return false
-        end
-        return true
-    end
-    return false
-end
-
-local function markAsDetected(targetObject)
-    local id = getObjectMemoryId(targetObject)
-    detectedBrainrots[id] = { timestamp = time(), name = targetObject.Name }
-    dprint("🧠 Marcado en memoria:", targetObject.Name, "ID:", id)
-end
-
-local function cleanupMemory()
-    local now = time()
-    local cleaned = 0
-    for id, data in pairs(detectedBrainrots) do
-        if now - data.timestamp > 30 then
-            detectedBrainrots[id] = nil
-            cleaned += 1
-        end
-    end
-    if cleaned > 0 then dprint("🧹 Memoria limpiada:", cleaned, "objetos removidos") end
-end
-
--- =======================
--- ESP de Objetos (brainrots)
--- =======================
-local function createESPHighlight(targetObject, targetName)
-    if not isObjectValid(targetObject) then
-        dprint("❌ Objeto no válido:", targetName)
-        return
-    end
-    if wasRecentlyDetected(targetObject) then
-        dprint("🧠 Ya detectado recientemente:", targetName)
-        return
-    end
-    markAsDetected(targetObject)
-
-    -- Highlight con Adornee (padre en workspace)
-    local highlight = newHighlightFor(targetObject)
-    highlight.FillColor = getRainbowColor(rainbowHue)
-
-    local espData = {
-        highlight     = highlight,
-        timestamp     = time(),
-        targetName    = targetName,
-        uniqueId      = tostring(targetObject) .. "_" .. time(),
-        targetObject  = targetObject,
-        initialHue    = rainbowHue,
+    local h = newHighlightFor(targetObject)
+    h.FillColor = getRainbowColor(rainbowHue)
+    local d = {
+        highlight    = h,
+        createdAt    = time(),
+        initialHue   = rainbowHue,
+        targetName   = targetObject.Name
     }
-    table.insert(espLines, espData)
-    dprint("🌈 ESP Highlight creado para:", targetName, "Parent:", targetObject:GetFullName())
-    return espData
+    activeMarks[targetObject] = d
+    return d
 end
 
-local function cleanupExpiredESP()
-    local now = time()
-    for i = #espLines, 1, -1 do
-        local e = espLines[i]
-        local remove, reason = false, ""
-        if now - e.timestamp > 25 then
-            remove, reason = true, "expiró"
-        end
-        if not remove and not isObjectValid(e.targetObject) then
-            remove, reason = true, "objeto ya no existe"
-        end
-        if remove then
-            safeDestroy(e.highlight)
-            table.remove(espLines, i)
-            dprint("🗑️ ESP Highlight removido para:", e.targetName, "-", reason)
-        end
-    end
-end
-
-local function updateRainbowColors()
-    for _, e in ipairs(espLines) do
-        if e.highlight and isObjectValid(e.highlight) then
-            local lineHue = (e.initialHue + (time() - e.timestamp) * 0.5) % 1
-            e.highlight.FillColor = getRainbowColor(lineHue)
-        end
-    end
-end
-
--- Búsqueda en Plots (coincidencia exacta, con cuota opcional)
-local MAX_VISITED_PER_TICK = 300
-local function findTargetModelsInPlots()
-    local foundModels, visited = {}, 0
+local MAX_VISITED_PER_TICK = 600 -- cuota para evitar freeze en mapas enormes
+local function scanAllBrainrots()
+    -- escanea TODO el workspace, marca TODOS los que coinciden con targetSet
+    local visited = 0
+    local foundCount = 0
 
     local function searchIn(container, depth)
-        if depth > 10 then return end
+        if depth > 12 then return end
         for _, item in ipairs(container:GetChildren()) do
             if isObjectValid(item) then
                 visited += 1
                 if visited % MAX_VISITED_PER_TICK == 0 then task.wait() end
 
-                if targetSet[item.Name] then
-                    if item:IsA("Model") or item:IsA("BasePart") then
-                        if not wasRecentlyDetected(item) then
-                            table.insert(foundModels, {object = item, name = item.Name})
-                            dprint("🎯 BRAINROT:", item.Name, "en:", container.Name)
-                        end
-                    end
+                if targetSet[item.Name] and (item:IsA("Model") or item:IsA("BasePart")) then
+                    ensureMark(item)
+                    foundCount += 1
                 end
 
                 if item:IsA("Folder") or item:IsA("Model") then
@@ -414,21 +318,38 @@ local function findTargetModelsInPlots()
         end
     end
 
-    local function findPlotsFolder(container)
-        for _, obj in ipairs(container:GetChildren()) do
-            if obj.Name == "Plots" and obj:IsA("Folder") then
-                dprint("📁 Carpeta Plots en:", container.Name)
-                for _, plot in ipairs(obj:GetChildren()) do
-                    searchIn(plot, 0)
-                end
-            elseif obj:IsA("Folder") then
-                findPlotsFolder(obj)
-            end
+    searchIn(workspace, 0)
+    return foundCount
+end
+
+local function cleanupInvalidMarks()
+    -- elimina cualquier highlight cuyo objeto ya no exista/valga
+    local removed = 0
+    for inst, data in pairs(activeMarks) do
+        if not isObjectValid(inst) or not (data.highlight and isObjectValid(data.highlight)) then
+            if data and data.highlight then safeDestroy(data.highlight) end
+            activeMarks[inst] = nil
+            removed += 1
         end
     end
+    if removed > 0 then dprint("🗑️ Limpieza de marcas inválidas:", removed) end
+end
 
-    findPlotsFolder(workspace)
-    return foundModels
+local function updateRainbowColors()
+    for inst, data in pairs(activeMarks) do
+        if data.highlight and isObjectValid(data.highlight) then
+            local hue = (data.initialHue + (time() - data.createdAt) * rainbowSpeed) % 1
+            data.highlight.FillColor = getRainbowColor(hue)
+        end
+    end
+end
+
+local function updateESP_All()
+    if not espEnabled then return end
+    -- siempre: limpia inválidos y marca TODOS los presentes
+    cleanupInvalidMarks()
+    local count = scanAllBrainrots()
+    dprint("📊 Brainrots marcados/asegurados en esta pasada:", count, " | Activos:", dictCount(activeMarks))
 end
 
 local function performContinuousSearch()
@@ -436,40 +357,11 @@ local function performContinuousSearch()
     local now = time()
     if now - lastSearchTime < searchInterval then return end
     lastSearchTime = now
-
-    dprint("🔄 Búsqueda continua…")
-    cleanupExpiredESP()
-
-    local found = findTargetModelsInPlots()
-    local newDetections = 0
-    for _, data in ipairs(found) do
-        if isObjectValid(data.object) then
-            if createESPHighlight(data.object, data.name) then
-                newDetections += 1
-            end
-        end
-    end
-    if newDetections > 0 then
-        dprint("🎯 Nuevos brainrots detectados:", newDetections)
-    end
-    dprint("📊 Highlights activos:", #espLines)
-end
-
-local function updateESP()
-    if not espEnabled then return end
-    dprint("🔄 Actualizando ESP...")
-    cleanupExpiredESP()
-    local found = findTargetModelsInPlots()
-    for _, data in ipairs(found) do
-        if isObjectValid(data.object) then
-            createESPHighlight(data.object, data.name)
-        end
-    end
-    dprint("📊 Total highlights activos:", #espLines)
+    updateESP_All()
 end
 
 -- =======================
--- ESP de Jugadores
+-- ESP de Jugadores (igual que antes)
 -- =======================
 local function createPlayerESP(targetPlayer)
     if targetPlayer == player then return end
@@ -532,23 +424,11 @@ end
 
 local function cleanupPlayerESP()
     dprint("🗑️ Limpieza completa Player ESP…")
-    local cleaned = 0
     for uid, esp in pairs(playerESPData) do
         safeDestroy(esp.highlight)
         if esp.line then releaseLine(esp.line) end
         playerESPData[uid] = nil
-        cleaned += 1
     end
-    -- Por si quedaron líneas sueltas en el mundo (no debería por pool)
-    local orphaned = 0
-    for _, obj in ipairs(workspace:GetChildren()) do
-        if obj.Name == "PlayerESPLine" and obj:IsA("BasePart") and obj.Parent == workspace then
-            -- En vez de Destroy, preferimos enviarlas al pool:
-            releaseLine(obj)
-            orphaned += 1
-        end
-    end
-    dprint(("✅ Player ESP limpio: %d jugadores, %d líneas al pool"):format(cleaned, orphaned))
 end
 
 local function updatePlayerESP()
@@ -566,63 +446,9 @@ local function updatePlayerESP()
 end
 
 -- =======================
--- Notificaciones (Toast)
+-- Inicializar jugadores existentes (solo tracking)
 -- =======================
-local lastToastAt = 0
-local toastCooldown = 3
-
-local function showNotificationToast(playerName, models)
-    local toastGui = Instance.new("ScreenGui")
-    toastGui.Name = "NotificationToast"
-    toastGui.Parent = playerGui
-
-    local toastFrame = Instance.new("Frame")
-    toastFrame.Size = UDim2.new(0, 350, 0, 100)
-    toastFrame.Position = UDim2.new(0.5, -175, 1, -180)
-    toastFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    toastFrame.BorderSizePixel = 0
-    toastFrame.Parent = toastGui
-
-    local toastCorner = Instance.new("UICorner")
-    toastCorner.CornerRadius = UDim.new(0, 10)
-    toastCorner.Parent = toastFrame
-
-    local modelsText = (models and #models > 0) and table.concat(models, ", ") or "Ningún brainrot detectado"
-
-    local toastText = Instance.new("TextLabel")
-    toastText.Size = UDim2.new(1, -20, 1, -20)
-    toastText.Position = UDim2.new(0, 10, 0, 10)
-    toastText.BackgroundTransparency = 1
-    toastText.Text = "🚨 " .. playerName .. " se unió!\n🎯 Brainrots: " .. modelsText
-    toastText.TextColor3 = Color3.fromRGB(255, 255, 255)
-    toastText.TextScaled = true
-    toastText.Font = Enum.Font.Gotham
-    toastText.Parent = toastFrame
-
-    toastFrame.Position = UDim2.new(0.5, -175, 1, 0)
-    local tweenIn = TweenService:Create(toastFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back), {Position = UDim2.new(0.5, -175, 1, -180)})
-    tweenIn:Play()
-
-    task.spawn(function()
-        task.wait(5)
-        local tweenOut = TweenService:Create(toastFrame, TweenInfo.new(0.5), {Position = UDim2.new(0.5, -175, 1, 0)})
-        tweenOut:Play()
-        tweenOut.Completed:Once(function()
-            safeDestroy(toastGui)
-        end)
-    end)
-end
-
-local function showNotificationToastSafe(playerName, models)
-    local now = time()
-    if now - lastToastAt < toastCooldown then return end
-    lastToastAt = now
-    showNotificationToast(playerName, models)
-end
-
--- =======================
--- Inicializar jugadores existentes
--- =======================
+local trackedPlayers  = {}
 for _, existingPlayer in ipairs(Players:GetPlayers()) do
     trackedPlayers[existingPlayer.UserId] = true
 end
@@ -636,13 +462,16 @@ espButton.MouseButton1Click:Connect(function()
         espButton.Text = "ESP: ON"
         espButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
         dprint("🌈 ESP activado")
-        updateESP()
-        lastSearchTime = 0 -- para que la búsqueda continua dispare pronto
+        lastSearchTime = 0
+        updateESP_All() -- enciende y marca TODO ya
     else
         espButton.Text = "ESP: OFF"
         espButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-        for _, e in ipairs(espLines) do safeDestroy(e.highlight) end
-        espLines = {}
+        -- Apaga todo: destruye highlights activos y limpia mapa
+        for inst, data in pairs(activeMarks) do
+            if data and data.highlight then safeDestroy(data.highlight) end
+            activeMarks[inst] = nil
+        end
         dprint("❌ ESP desactivado, highlights limpiados")
     end
 end)
@@ -689,20 +518,18 @@ Players.PlayerAdded:Connect(function(newPlayer)
     trackedPlayers[newPlayer.UserId] = true
 
     if notificationsEnabled and newPlayer ~= player then
-        task.wait(0.5)
-        playNotificationSound()
-        showNotificationToastSafe(newPlayer.Name, {})
+        task.wait(0.4)
+        showNotificationToast(newPlayer.Name, {})
     end
 
     if espEnabled then
-        dprint("🔄 Actualizando ESP por unión…")
-        task.wait(0.5)
-        updateESP()
+        task.wait(0.4)
+        updateESP_All() -- al entrar alguien, asegúrate de que todo está marcado igual
     end
 
     if playerESPEnabled then
         local function onChar(_char)
-            task.wait(0.5)
+            task.wait(0.3)
             -- Limpia anterior si existía
             local d = playerESPData[newPlayer.UserId]
             if d then
@@ -727,16 +554,15 @@ Players.PlayerRemoving:Connect(function(leavingPlayer)
         playerESPData[leavingPlayer.UserId] = nil
         dprint("🗑️ ESP limpiado para:", leavingPlayer.Name)
     end
-    dprint("ℹ️ No se actualiza ESP de objetos al salir (evita fantasmas)")
 end)
 
--- Respawns para jugadores ya presentes (distinto del PlayerAdded)
+-- Respawns para jugadores ya presentes
 for _, existing in ipairs(Players:GetPlayers()) do
     if existing ~= player then
         existing.CharacterAdded:Connect(function(_char)
             dprint("🔄 Respawn:", existing.Name)
             if playerESPEnabled then
-                task.wait(0.5)
+                task.wait(0.3)
                 local d = playerESPData[existing.UserId]
                 if d then
                     safeDestroy(d.highlight)
@@ -752,149 +578,43 @@ end
 -- =======================
 -- Loop principal (Heartbeat)
 -- =======================
-local lastCleanupTime, lastMemoryCleanup, lastPlayerESPUpdate = 0, 0, 0
+local lastPlayerESPUpdate = 0
 
 RunService.Heartbeat:Connect(function(dt)
-    local now = time()
-
-    -- Animación global rainbow (suave)
+    -- animación rainbow global base
     rainbowHue = (rainbowHue + 0.02) % 1
 
-    if espEnabled and #espLines > 0 then
+    -- colores de highlights activos
+    if espEnabled and dictCount(activeMarks) > 0 then
         updateRainbowColors()
     end
 
+    -- búsqueda continua (asegura TODO, re-marca lo que falte)
     if espEnabled and continuousSearchEnabled then
         performContinuousSearch()
     end
 
-    -- Actualización de líneas a ~30fps
+    -- Player ESP ~30fps
+    local now = time()
     if playerESPEnabled and (now - lastPlayerESPUpdate) >= (1/33) then
         lastPlayerESPUpdate = now
         updatePlayerESPLines()
     end
 
-    if espEnabled and (now - lastCleanupTime) >= 2 then
-        lastCleanupTime = now
-        cleanupExpiredESP()
-    end
-
-    if (now - lastMemoryCleanup) >= 10 then
-        lastMemoryCleanup = now
-        cleanupMemory()
+    -- limpieza de marcas inválidas por seguridad
+    if espEnabled then
+        cleanupInvalidMarks()
     end
 end)
 
 -- =======================
--- Funciones de prueba (debug)
+-- Helpers debug opcionales
 -- =======================
-local function testSound() dprint("🧪 Sonido…"); playNotificationSound() end
-local function testPlotSearch()
-    dprint("🧪 Búsqueda Plots…")
-    local found = findTargetModelsInPlots()
-    dprint("Resultados:", #found)
-    for _, m in ipairs(found) do dprint("- ".. m.name, "- Válido:", isObjectValid(m.object)) end
-end
-
-local function forceUpdateESP() dprint("🧪 Forzando update ESP…"); updateESP() end
-
-local function cleanupAllESP()
-    dprint("🧪 Limpiando todos los highlights ESP…")
-    for _, e in ipairs(espLines) do safeDestroy(e.highlight) end
-    espLines = {}
-    dprint("✅ Highlights ESP limpiados")
-end
-
-local function clearMemory()
-    dprint("🧪 Limpiar memoria…")
-    detectedBrainrots = {}
-    dprint("✅ Memoria limpia")
-end
-
-local function showMemoryStatus()
-    dprint("🧠 Estado memoria:")
-    local count, now = 0, time()
-    for _, data in pairs(detectedBrainrots) do
-        local left = 25 - (now - data.timestamp)
-        if left > 0 then
-            count += 1
-            dprint(("   - %s (quedan %ds)"):format(data.name, math.floor(left)))
-        end
-    end
-    dprint("Total en memoria:", count)
-end
-
-local function setSearchInterval(seconds)
+_G.setSearchInterval = function(seconds)
     searchInterval = tonumber(seconds) or 2
-    dprint("🔄 Intervalo de búsqueda a:", searchInterval, "s")
+    dprint("🔄 Intervalo búsqueda:", searchInterval, "s")
 end
 
-local function testPlayerESP() dprint("🧪 Probar ESP jugadores…"); updatePlayerESP() end
-
-local function cleanupAllPlayerESP() dprint("🧪 Limpieza total Player ESP…"); cleanupPlayerESP() end
-
-local function showPlayerESPStatus()
-    dprint("👥 Estado Player ESP:")
-    dprint("   - Activado:", playerESPEnabled)
-    local validCount = 0
-    for _, esp in pairs(playerESPData) do
-        local p = esp.targetPlayer
-        local ok = p and p.Parent and p.Character
-        if ok then validCount += 1 end
-        dprint(("   - %s (Válido:%s, HL:%s, Línea:%s)"):format(
-            p and p.Name or "Desconocido",
-            tostring(ok),
-            tostring(esp.highlight ~= nil),
-            tostring(esp.line ~= nil and esp.line.Parent ~= nil)
-        ))
-    end
-    dprint(("   - Total jugadores válidos: %d de %d"):format(validCount, dictCount(playerESPData)))
-
-    local orphaned = 0
-    for _, obj in ipairs(workspace:GetChildren()) do
-        if obj.Name == "PlayerESPLine" and obj:IsA("BasePart") and obj.Parent == workspace then
-            orphaned += 1
-        end
-    end
-    if orphaned > 0 then dprint("   ⚠️ Líneas huérfanas detectadas:", orphaned) end
-end
-
-local function cleanupOrphanedLines()
-    dprint("🧹 Enviando líneas huérfanas al pool…")
-    local count = 0
-    for _, obj in ipairs(workspace:GetChildren()) do
-        if obj.Name == "PlayerESPLine" and obj:IsA("BasePart") and obj.Parent == workspace then
-            releaseLine(obj)
-            count += 1
-        end
-    end
-    dprint("✅ Líneas al pool:", count)
-end
-
--- Exponer helpers debug globales
-_G.testESPSound           = testSound
-_G.testPlotSearch         = testPlotSearch
-_G.forceUpdateESP         = forceUpdateESP
-_G.cleanupAllESP          = cleanupAllESP
-_G.clearMemory            = clearMemory
-_G.showMemoryStatus       = showMemoryStatus
-_G.setSearchInterval      = setSearchInterval
-_G.testPlayerESP          = testPlayerESP
-_G.cleanupAllPlayerESP    = cleanupAllPlayerESP
-_G.showPlayerESPStatus    = showPlayerESPStatus
-_G.cleanupOrphanedLines   = cleanupOrphanedLines
-
--- =======================
--- Logs iniciales
--- =======================
-print("🚀 ESP Panel Rainbow (Optimizado) cargado!")
-print("🌈 Nuevas mejoras: pooling de líneas, Highlight.Adornee, eventos consolidados, GUI arrastrable, time()/task.*")
-print("🎯 Buscando brainrots (coincidencia exacta):")
-for i, name in ipairs((function()
-    local list = {}
-    for k in pairs(targetSet) do table.insert(list, k) end
-    table.sort(list)
-    return list
-end)()) do
-    print(("   %02d. %s"):format(i, name))
-end
+print("🚀 ESP Panel Rainbow (FULL, sin límite) cargado!")
+print("🌈 Highlights SIN expiración; búsqueda continua re-marca TODO lo que falte.")
+print("🎯 Coincidencia exacta para nombres listados (", tostring(dictCount(targetSet)), " nombres ).")
