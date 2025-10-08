@@ -1,13 +1,13 @@
 --// =========================
---//  ESP LITE+ SECURE v1.5.0
---//  Brainrots ESP (15s, sin límite, sólo nuevos) + Notifs + ESP Player PRO
+--//  ESP LITE+ SECURE v1.6.0
+--//  Brainrots ESP (15s, sin límite) + Notifs + ESP Player PRO
 --//  X-Ray (LTM, no revive invisibles, excluye brainrots) + Ghost + Reset + Unload
---//  Robusto: anti-doble ejecución, pcall/safeConnect, BFS incremental, GUI mejorada
+--//  GUI mejorada (layout limpio, switches) + Modo Noche
 --// =========================
 
 -- ===== Seguridad / Anti doble ejecución =====
 local G = getgenv and getgenv() or _G
-G.BRAINROT_ESP_VERSION = "1.5.0-secure"
+G.BRAINROT_ESP_VERSION = "1.6.0-secure"
 G.BRAINROT_ESP_NAME    = "ESP_LITE_PLUS_SECURE"
 
 if G.__BRAINROT_ESP_RUNNING then return end
@@ -28,7 +28,6 @@ end
 local Players      = safeService("Players")
 local RunService   = safeService("RunService")
 local TweenService = safeService("TweenService")
-local StarterGui   = safeService("StarterGui")
 
 if not (Players and RunService and TweenService) then
     G.__BRAINROT_ESP_RUNNING = false
@@ -46,14 +45,13 @@ local function isInstance(x) return typeof(x) == "Instance" end
 local function isValid(inst) return isInstance(inst) and inst.Parent ~= nil and inst:IsDescendantOf(game) end
 local function safeDestroy(x) if isInstance(x) and x.Destroy then pcall(function() x:Destroy() end) end end
 local function hsv(h) return Color3.fromHSV(h,1,1) end
-local function try(fn, ...) local ok, r = pcall(fn, ...); return ok, r end
 
 -- Conexiones manejables (para Unload)
 local CONNECTIONS = {}
 local function safeConnect(signal, fn)
     local c = signal:Connect(function(...)
         local ok = pcall(fn, ...)
-        if not ok then end -- silencioso
+        if not ok then end
     end)
     table.insert(CONNECTIONS, c)
     return c
@@ -114,7 +112,7 @@ local function newHighlight(target)
     h.FillTransparency    = 0.45
     h.OutlineTransparency = 0.15
     h.OutlineColor        = Color3.new(1,1,1)
-    h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop -- atraviesa paredes
+    h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
     h.Parent = workspace
     return h
 end
@@ -145,7 +143,7 @@ end
 local function enableXRay() xrayEnabled = true;  applyXRay(workspace) end
 local function disableXRay() xrayEnabled = false; restoreXRay(workspace) end
 
--- Cuando detectamos un brainrot, quitar cualquier LTM previo en todas sus partes
+-- Quitar LTM a brainrot detectado
 local function unXrayBrainrot(root)
     if not isValid(root) then return end
     local function restoreTree(n)
@@ -196,13 +194,11 @@ end
 
 local function startScan() qreset(); qpush(workspace) end
 
--- Nuevos objetos en el mapa
+-- Nuevos objetos
 safeConnect(workspace.DescendantAdded, function(i)
-    -- X-Ray: no tocar descendientes de brainrots ni Players/UI
     if xrayEnabled and i:IsA("BasePart") and not shouldIgnore(i) and not hasBrainrotAncestor(i) and not isBrainrotNode(i) then
         setLTM(i, XRAY_TRANSPARENCY)
     end
-    -- ESP: marcar si es brainrot válido
     if isBrainrotNode(i) and targetSet[i.Name] then
         markOnce(i)
     end
@@ -239,8 +235,8 @@ local function toast(msg)
     gui.Name = "Toast_"..G.BRAINROT_ESP_NAME
     gui.Parent = playerGui
     local f = Instance.new("Frame")
-    f.Size = UDim2.new(0,320,0,85)
-    f.Position = UDim2.new(0.5,-160,1,-95)
+    f.Size = UDim2.new(0,320,0,80)
+    f.Position = UDim2.new(0.5,-160,1,-90)
     f.BackgroundColor3 = Color3.fromRGB(40,40,40)
     f.BorderSizePixel = 0
     f.Parent = gui
@@ -255,7 +251,7 @@ local function toast(msg)
     l.Font = Enum.Font.Gotham
     l.Parent = f
     f.Position = UDim2.new(0.5,-160,1,0)
-    TweenService:Create(f,TweenInfo.new(0.3, Enum.EasingStyle.Back),{Position=UDim2.new(0.5,-160,1,-95)}):Play()
+    TweenService:Create(f,TweenInfo.new(0.3, Enum.EasingStyle.Back),{Position=UDim2.new(0.5,-160,1,-90)}):Play()
     task.delay(3.0, function()
         local tw = TweenService:Create(f,TweenInfo.new(0.25),{Position=UDim2.new(0.5,-160,1,0)})
         tw:Play()
@@ -267,18 +263,15 @@ end
 local linePool = {}
 local function getLine()
     local l = table.remove(linePool)
-    if l then 
-        l.Parent = workspace
-        return l 
-    end
+    if l then l.Parent = workspace; return l end
     l = Instance.new("Part")
     l.Name = "PlayerESPLine"
     l.Anchored = true
     l.CanCollide = false
-    l.Size = Vector3.new(0.25, 0.25, 1)     -- más gruesa
-    l.Material = Enum.Material.ForceField   -- brillante/visible a través
-    l.Color = Color3.fromRGB(255, 0, 0)     -- rojo intenso
-    l.Transparency = 0.1                    -- glow
+    l.Size = Vector3.new(0.25, 0.25, 1)
+    l.Material = Enum.Material.ForceField
+    l.Color = Color3.fromRGB(255, 0, 0)
+    l.Transparency = 0.1
     l.Parent = workspace
     return l
 end
@@ -288,44 +281,29 @@ local function makeBillboard(targetPlayer)
     local bb = Instance.new("BillboardGui")
     bb.Name = "ESPPlayerBillboard"
     bb.AlwaysOnTop = true
-    bb.Size = UDim2.fromOffset(200, 50)
+    bb.Size = UDim2.fromOffset(180, 42)
     bb.StudsOffsetWorldSpace = Vector3.new(0, 3.2, 0)
     bb.MaxDistance = 3000
-    local holder = Instance.new("Frame")
-    holder.Name = "Holder"
-    holder.BackgroundColor3 = Color3.fromRGB(25,25,25)
-    holder.BackgroundTransparency = 0.25
-    holder.Size = UDim2.fromScale(1,1)
-    holder.Parent = bb
+    local holder = Instance.new("Frame"); holder.Name="Holder"; holder.BackgroundColor3 = Color3.fromRGB(25,25,25); holder.BackgroundTransparency=0.25; holder.Size = UDim2.fromScale(1,1); holder.Parent = bb
     local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0,6); corner.Parent = holder
-    local label = Instance.new("TextLabel")
-    label.Name = "Text"
-    label.BackgroundTransparency = 1
-    label.Size = UDim2.fromScale(1,1)
-    label.TextScaled = true
-    label.Font = Enum.Font.GothamBold
-    label.TextColor3 = Color3.new(1,1,1)
-    label.TextStrokeTransparency = 0.3
-    label.Text = targetPlayer.Name
-    label.Parent = holder
+    local label = Instance.new("TextLabel"); label.Name="Text"; label.BackgroundTransparency=1; label.Size=UDim2.fromScale(1,1); label.TextScaled=true; label.Font=Enum.Font.GothamBold; label.TextColor3=Color3.new(1,1,1); label.TextStrokeTransparency=0.3; label.TextXAlignment = Enum.TextXAlignment.Center; label.Text = targetPlayer.Name; label.Parent = holder
     return bb, label
 end
 
 local playerESPEnabled=false
 -- uid -> {p, hl, line, bb, lbl}
 local playerESPData={}
-
 local lastPEspUpd = 0
+
+local function newHighlightPlayer(char)
+    local h = newHighlight(char); h.FillColor = Color3.new(1,0,0); return h
+end
+
 local function ensurePlayerESP(uid)
     local d = playerESPData[uid]
     if not d then return end
-    if not isValid(d.hl) and d.p and d.p.Character then
-        local hl = newHighlight(d.p.Character); hl.FillColor=Color3.new(1,0,0)
-        d.hl = hl
-    end
-    if not isValid(d.line) then
-        d.line = getLine()
-    end
+    if not isValid(d.hl) and d.p and d.p.Character then d.hl = newHighlightPlayer(d.p.Character) end
+    if not isValid(d.line) then d.line = getLine() end
     if not (isValid(d.bb) and isValid(d.lbl)) then
         local bb, lbl = makeBillboard(d.p)
         local hrp = d.p.Character and d.p.Character:FindFirstChild("HumanoidRootPart")
@@ -339,39 +317,27 @@ local function createPlayerESP(p)
     if p==LP or playerESPData[p.UserId] then return end
     local char=p.Character if not char then return end
     local hrp=char:FindFirstChild("HumanoidRootPart") if not hrp then return end
-    local hl = newHighlight(char); hl.FillColor=Color3.new(1,0,0)
+    local hl = newHighlightPlayer(char)
     local line = getLine()
-    local bb, lbl = makeBillboard(p)
-    bb.Adornee = hrp
-    bb.Parent = workspace
+    local bb, lbl = makeBillboard(p); bb.Adornee = hrp; bb.Parent = workspace
     playerESPData[p.UserId] = {p=p, hl=hl, line=line, bb=bb, lbl=lbl}
 end
 
 local function clearPlayerESP()
-    for _,d in pairs(playerESPData) do
-        safeDestroy(d.hl)
-        freeLine(d.line)
-        safeDestroy(d.bb)
-    end
+    for _,d in pairs(playerESPData) do safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) end
     table.clear(playerESPData)
 end
 
 local function updatePlayerESPLines()
-    local now = time()
-    if now - lastPEspUpd < 1/PLAYER_LINE_FPS then return end
-    lastPEspUpd = now
-    local myHRP = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-    if not myHRP then return end
+    local now = time(); if now - lastPEspUpd < 1/PLAYER_LINE_FPS then return end; lastPEspUpd = now
+    local myHRP = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart"); if not myHRP then return end
     local myPos = myHRP.Position
     local toRemove={}
     for uid,d in pairs(playerESPData) do
         local p=d.p; local char=p and p.Character; local hrp=char and char:FindFirstChild("HumanoidRootPart")
-        if not (p and char and hrp) then
-            table.insert(toRemove, uid)
+        if not (p and char and hrp) then table.insert(toRemove, uid)
         else
-            -- Asegurar componentes si se perdieron por cualquier motivo
             ensurePlayerESP(uid)
-
             if isValid(d.line) then
                 local tpos = hrp.Position
                 local dir  = tpos - myPos
@@ -385,10 +351,7 @@ local function updatePlayerESPLines()
             end
         end
     end
-    for _,uid in ipairs(toRemove) do
-        local d = playerESPData[uid]
-        if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[uid]=nil end
-    end
+    for _,uid in ipairs(toRemove) do local d = playerESPData[uid]; if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[uid]=nil end end
 end
 
 -- ===== Ghost (70%) =====
@@ -403,262 +366,199 @@ local function ghostOn()  ghostEnabled=true;  if LP.Character then setCharTransp
 local function ghostOff() ghostEnabled=false; if LP.Character then setCharTransp(LP.Character,0.0) end end
 safeConnect(LP.CharacterAdded, function(c) task.wait(0.2); if ghostEnabled then setCharTransp(c,0.7) end end)
 
--- ===== GUI Mejorada =====
-local gui = Instance.new("ScreenGui")
-gui.Name = "GUI_"..G.BRAINROT_ESP_NAME
-gui.ResetOnSpawn = false
-gui.Parent = playerGui
+-- ===== THEME (Modo Noche) =====
+local theme = {
+    night = {
+        mainBg   = Color3.fromRGB(20,20,22),
+        headerBg = Color3.fromRGB(36,36,40),
+        text     = Color3.fromRGB(235,235,245),
+        muted    = Color3.fromRGB(170,170,180),
+        switchOn = Color3.fromRGB(60,200,60),
+        switchOff= Color3.fromRGB(90,90,95),
+        btnReset = Color3.fromRGB(70,110,255),
+        btnOff   = Color3.fromRGB(90,90,95),
+        shadow   = 0.65,
+    },
+    day = {
+        mainBg   = Color3.fromRGB(240,240,245),
+        headerBg = Color3.fromRGB(220,220,230),
+        text     = Color3.fromRGB(20,20,25),
+        muted    = Color3.fromRGB(70,70,80),
+        switchOn = Color3.fromRGB(60,170,250),
+        switchOff= Color3.fromRGB(180,180,190),
+        btnReset = Color3.fromRGB(255,120,80),
+        btnOff   = Color3.fromRGB(180,180,190),
+        shadow   = 0.35,
+    }
+}
+local themeModeNight = true -- por defecto: modo noche
 
-local main = Instance.new("Frame")
-main.Size = UDim2.new(0,260,0,420)
-main.Position = UDim2.new(1,-270,0,10)
-main.BackgroundColor3 = Color3.fromRGB(26,26,28)
-main.Active = true
-main.Draggable = true
-main.Parent = gui
+-- ===== GUI (layout limpio, nada se sale) =====
+local gui = Instance.new("ScreenGui"); gui.Name="GUI_"..G.BRAINROT_ESP_NAME; gui.ResetOnSpawn=false; gui.Parent=playerGui
+
+local main = Instance.new("Frame"); main.Size=UDim2.new(0,280,0,470); main.Position=UDim2.new(1,-290,0,10); main.Active=true; main.Draggable=true; main.Parent=gui
 Instance.new("UICorner", main).CornerRadius = UDim.new(0,12)
 
-local shadow = Instance.new("ImageLabel")
-shadow.Name = "Shadow"
-shadow.BackgroundTransparency = 1
-shadow.Image = "rbxassetid://5028857084"
-shadow.ImageColor3 = Color3.fromRGB(0,0,0)
-shadow.ImageTransparency = 0.6
-shadow.ScaleType = Enum.ScaleType.Slice
-shadow.SliceCenter = Rect.new(24,24,276,276)
-shadow.Size = UDim2.new(1,20,1,20)
-shadow.Position = UDim2.new(0,-10,0,-10)
-shadow.Parent = main
-
-local header = Instance.new("Frame")
-header.Size = UDim2.new(1,0,0,40)
-header.BackgroundColor3 = Color3.fromRGB(40,40,44)
-header.Parent = main
-Instance.new("UICorner", header).CornerRadius = UDim.new(0,12)
+local header = Instance.new("Frame"); header.Size=UDim2.new(1,0,0,46); header.Parent=main; Instance.new("UICorner", header).CornerRadius=UDim.new(0,12)
 
 local title = Instance.new("TextLabel")
-title.BackgroundTransparency = 1
-title.Size = UDim2.new(1,-80,1,0)
-title.Position = UDim2.new(0,12,0,0)
-title.Text = "ESP LITE+ • "..G.BRAINROT_ESP_VERSION
-title.TextColor3 = Color3.fromRGB(235,235,245)
-title.Font = Enum.Font.GothamBold
-title.TextScaled = true
-title.Parent = header
+title.BackgroundTransparency=1; title.Size=UDim2.new(1,-76,1,0); title.Position=UDim2.new(0,12,0,0)
+title.Text="ESP LITE+ • "..G.BRAINROT_ESP_VERSION; title.Font=Enum.Font.GothamBold; title.TextScaled=true; title.Parent=header
 
 local minimize = Instance.new("TextButton")
-minimize.Size = UDim2.new(0,28,0,28)
-minimize.Position = UDim2.new(1,-36,0.5,-14)
-minimize.Text = "–"
-minimize.Font = Enum.Font.GothamBold
-minimize.TextScaled = true
-minimize.TextColor3 = Color3.new(1,1,1)
-minimize.BackgroundColor3 = Color3.fromRGB(60,60,64)
-minimize.Parent = header
+minimize.Size=UDim2.new(0,30,0,30); minimize.Position=UDim2.new(1,-36,0.5,-15); minimize.Text="–"
+minimize.Font=Enum.Font.GothamBold; minimize.TextScaled=true; minimize.Parent=header
 Instance.new("UICorner", minimize).CornerRadius = UDim.new(0,8)
 
-local body = Instance.new("Frame")
-body.Size = UDim2.new(1,-20,1,-60)
-body.Position = UDim2.new(0,10,0,50)
-body.BackgroundTransparency = 1
-body.Parent = main
+local body = Instance.new("Frame"); body.Size=UDim2.new(1,-20,1,-86); body.Position=UDim2.new(0,10,0,60); body.Parent=main
+local pad = Instance.new("UIPadding"); pad.PaddingTop=UDim.new(0,6); pad.PaddingBottom=UDim.new(0,6); pad.PaddingLeft=UDim.new(0,6); pad.PaddingRight=UDim.new(0,6); pad.Parent=body
+local list = Instance.new("UIListLayout"); list.SortOrder=Enum.SortOrder.LayoutOrder; list.Padding = UDim.new(0,8); list.Parent=body
 
 local status = Instance.new("TextLabel")
-status.BackgroundTransparency = 1
-status.Size = UDim2.new(1,0,0,24)
-status.Position = UDim2.new(0,0,1,-26)
-status.TextColor3 = Color3.fromRGB(170,170,180)
-status.Font = Enum.Font.Gotham
-status.TextScaled = true
-status.Text = "Brainrots activos: 0  |  Players ESP: 0"
-status.Parent = main
+status.BackgroundTransparency=1; status.Size=UDim2.new(1,-20,0,22); status.Position=UDim2.new(0,10,1,-26)
+status.Font=Enum.Font.Gotham; status.TextScaled=true; status.Parent=main
 
-local collapsed = false
-minimize.MouseButton1Click:Connect(function()
-    collapsed = not collapsed
-    if collapsed then
-        TweenService:Create(main, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {Size = UDim2.new(0,260,0,80)}):Play()
-        body.Visible = false
-        status.Visible = false
-        minimize.Text = "+"
-    else
-        TweenService:Create(main, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {Size = UDim2.new(0,260,0,420)}):Play()
-        task.wait(0.25)
-        body.Visible = true
-        status.Visible = true
-        minimize.Text = "–"
-    end
-end)
-
--- Switch helper (visual tipo toggle)
-local function makeSwitch(y, labelText, defaultOn, tipText)
-    local row = Instance.new("Frame")
-    row.Size = UDim2.new(1,0,0,40)
-    row.Position = UDim2.new(0,0,0,y)
-    row.BackgroundTransparency = 1
-    row.Parent = body
-
-    local l = Instance.new("TextLabel")
-    l.BackgroundTransparency = 1
-    l.Size = UDim2.new(1,-80,1,0)
-    l.Position = UDim2.new(0,0,0,0)
-    l.Text = labelText
-    l.TextColor3 = Color3.fromRGB(230,230,235)
-    l.Font = Enum.Font.Gotham
-    l.TextScaled = true
-    l.Parent = row
-
+-- Switch helper alineado (label izquierda, toggle derecha)
+local function makeSwitch(labelText, defaultOn, tipText)
+    local row = Instance.new("Frame"); row.Size=UDim2.new(1,0,0, tipText and 62 or 44); row.LayoutOrder = 10; row.Parent=body
+    local l = Instance.new("TextLabel"); l.BackgroundTransparency=1; l.Position=UDim2.new(0,0,0,0); l.Size=UDim2.new(1,-84,0,24)
+    l.Font=Enum.Font.Gotham; l.TextScaled=true; l.TextXAlignment=Enum.TextXAlignment.Left; l.Text=labelText; l.Parent=row
+    local tip
     if tipText then
-        l.Text = labelText .. "  "
-        local tip = Instance.new("TextLabel")
-        tip.BackgroundTransparency = 1
-        tip.Size = UDim2.new(1,-80,1,0)
-        tip.Position = UDim2.new(0,0,0,20)
-        tip.Text = tipText
-        tip.TextColor3 = Color3.fromRGB(150,150,160)
-        tip.Font = Enum.Font.Gotham
-        tip.TextScaled = false
-        tip.TextSize = 12
-        tip.TextXAlignment = Enum.TextXAlignment.Left
-        tip.Parent = row
-        row.Size = UDim2.new(1,0,0,50)
+        tip = Instance.new("TextLabel"); tip.BackgroundTransparency=1; tip.Position=UDim2.new(0,0,0,26); tip.Size=UDim2.new(1,-84,0,18)
+        tip.Font=Enum.Font.Gotham; tip.TextScaled=false; tip.TextSize=12; tip.TextXAlignment=Enum.TextXAlignment.Left; tip.Text=tipText; tip.Parent=row
     end
-
-    local switch = Instance.new("Frame")
-    switch.Size = UDim2.new(0,54,0,26)
-    switch.Position = UDim2.new(1,-60,0.5,-13)
-    switch.BackgroundColor3 = defaultOn and Color3.fromRGB(60,200,60) or Color3.fromRGB(90,90,95)
-    switch.Parent = row
-    Instance.new("UICorner", switch).CornerRadius = UDim.new(1,0)
-
-    local knob = Instance.new("Frame")
-    knob.Size = UDim2.new(0,22,0,22)
-    knob.Position = defaultOn and UDim2.new(1,-24,0.5,-11) or UDim2.new(0,2,0.5,-11)
-    knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
-    knob.Parent = switch
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
-
-    local btn = Instance.new("TextButton")
-    btn.BackgroundTransparency = 1
-    btn.Size = UDim2.new(1,0,1,0)
-    btn.Text = ""
-    btn.Parent = switch
+    local switch = Instance.new("Frame"); switch.Size=UDim2.new(0,54,0,26); switch.Position=UDim2.new(1,-60,0,9); switch.Parent=row
+    Instance.new("UICorner", switch).CornerRadius=UDim.new(1,0)
+    local knob = Instance.new("Frame"); knob.Size=UDim2.new(0,22,0,22); knob.Position=UDim2.new(0,2,0,2); knob.Parent=switch
+    Instance.new("UICorner", knob).CornerRadius=UDim.new(1,0)
+    local btn = Instance.new("TextButton"); btn.BackgroundTransparency=1; btn.Size=UDim2.new(1,0,1,0); btn.Text=""; btn.Parent=switch
 
     local state = defaultOn
     local function setState(on)
         state = on
-        TweenService:Create(switch, TweenInfo.new(0.18), {BackgroundColor3 = on and Color3.fromRGB(60,200,60) or Color3.fromRGB(90,90,95)}):Play()
-        TweenService:Create(knob, TweenInfo.new(0.18), {Position = on and UDim2.new(1,-24,0.5,-11) or UDim2.new(0,2,0.5,-11)}):Play()
+        TweenService:Create(switch, TweenInfo.new(0.16), {BackgroundColor3 = on and (themeModeNight and theme.night.switchOn or theme.day.switchOn) or (themeModeNight and theme.night.switchOff or theme.day.switchOff)}):Play()
+        TweenService:Create(knob,   TweenInfo.new(0.16), {Position = on and UDim2.new(1,-24,0,2) or UDim2.new(0,2,0,2)}):Play()
     end
     setState(defaultOn)
-
     return {
-        row = row,
-        set = setState,
-        get = function() return state end,
-        button = btn,
+        row=row, label=l, tip=tip, switch=switch, knob=knob, btn=btn,
+        get=function() return state end,
+        set=setState,
     }
 end
 
--- Botones y switches
-local swESP      = makeSwitch(0,   "ESP Brainrots", false, "Marca brainrots listados por 15s (sin límite)")
-local swCont     = makeSwitch(55,  "Búsqueda continua", true, "Refuerza el escaneo (bajo costo)")
-local swNotif    = makeSwitch(110, "Notificaciones", true, "Alerta al entrar jugadores")
-local swPlayer   = makeSwitch(165, "ESP de jugadores", false, "Línea + nombre + distancia + highlight")
-local swXRay     = makeSwitch(220, "X-RAY del mapa (80%)", false, "Oculta mapa sin afectar brainrots")
-local swGhost    = makeSwitch(275, "Ghost (Yo 70%)", false, "Tu personaje más transparente")
+-- Botón helper
+local function makeButton(text, color, layoutOrder)
+    local b = Instance.new("TextButton")
+    b.Size=UDim2.new(1,0,0,40); b.LayoutOrder = layoutOrder or 100
+    b.BackgroundColor3 = color; b.TextColor3 = Color3.new(1,1,1)
+    b.TextScaled=true; b.Font=Enum.Font.GothamBold; b.Text=text; b.Parent=body
+    Instance.new("UICorner", b).CornerRadius=UDim.new(0,8)
+    return b
+end
 
--- Botón Reset / Unload
-local actions = Instance.new("Frame")
-actions.Size = UDim2.new(1,0,0,40)
-actions.Position = UDim2.new(0,0,0,330)
-actions.BackgroundTransparency = 1
-actions.Parent = body
+-- Switches
+local swNight   = makeSwitch("Modo Noche", true, "Tema oscuro de alto contraste")
+local swESP     = makeSwitch("ESP Brainrots", false, "Marca brainrots listados por 15s (sin límite)")
+local swCont    = makeSwitch("Búsqueda continua", true, "Refuerza el escaneo (bajo costo)")
+local swNotif   = makeSwitch("Notificaciones", true, "Alerta al entrar jugadores")
+local swPlayer  = makeSwitch("ESP de jugadores", false, "Línea + nombre + distancia + highlight")
+local swXRay    = makeSwitch("X-RAY del mapa (80%)", false, "Oculta mapa sin afectar brainrots")
+local swGhost   = makeSwitch("Ghost (Yo 70%)", false, "Tu personaje más transparente")
 
-local btnReset = Instance.new("TextButton")
-btnReset.Size = UDim2.new(0.48, -5, 1, 0)
-btnReset.Position = UDim2.new(0,0,0,0)
-btnReset.BackgroundColor3 = Color3.fromRGB(70,110,255)
-btnReset.TextColor3 = Color3.new(1,1,1)
-btnReset.TextScaled = true
-btnReset.Font = Enum.Font.GothamBold
-btnReset.Text = "RESET ESP"
-btnReset.Parent = actions
-Instance.new("UICorner", btnReset).CornerRadius = UDim.new(0,8)
+local btnReset  = makeButton("RESET ESP", theme.night.btnReset, 200)
+local btnUnload = makeButton("UNLOAD", theme.night.btnOff, 201)
 
-local btnUnload = Instance.new("TextButton")
-btnUnload.Size = UDim2.new(0.48, -5, 1, 0)
-btnUnload.Position = UDim2.new(1,-btnUnload.Size.X.Offset-5,0,0)
-btnUnload.BackgroundColor3 = Color3.fromRGB(90,90,95)
-btnUnload.TextColor3 = Color3.new(1,1,1)
-btnUnload.TextScaled = true
-btnUnload.Font = Enum.Font.GothamBold
-btnUnload.Text = "UNLOAD"
-btnUnload.Parent = actions
-Instance.new("UICorner", btnUnload).CornerRadius = UDim.new(0,8)
-
--- ===== Estado toggles =====
-local espEnabled  = false
-local contEnabled = true
-local notifEnabled= true
-local playerESPEnabled = false
-
--- ===== Lógica switches =====
-swESP.button.MouseButton1Click:Connect(function()
-    espEnabled = not espEnabled
-    swESP.set(espEnabled)
-    if espEnabled then
-        startScan()
-        toast("ESP activado (15s)")
+-- Min/Max
+local collapsed=false
+minimize.MouseButton1Click:Connect(function()
+    collapsed = not collapsed
+    if collapsed then
+        TweenService:Create(main, TweenInfo.new(0.22), {Size=UDim2.new(0,280,0,86)}):Play()
+        body.Visible=false; status.Visible=false; minimize.Text="+"
     else
-        for inst,data in pairs(activeMarks) do safeDestroy(data.hl); activeMarks[inst]=nil end
-        toast("ESP desactivado")
+        TweenService:Create(main, TweenInfo.new(0.22), {Size=UDim2.new(0,280,0,470)}):Play()
+        task.wait(0.22); body.Visible=true; status.Visible=true; minimize.Text="–"
     end
 end)
 
-swCont.button.MouseButton1Click:Connect(function()
+-- ===== Theme apply =====
+local function applyTheme()
+    local t = themeModeNight and theme.night or theme.day
+    main.BackgroundColor3   = t.mainBg
+    header.BackgroundColor3 = t.headerBg
+    title.TextColor3        = t.text
+    minimize.TextColor3     = t.text
+    status.TextColor3       = t.muted
+    -- switches
+    local sws = {swNight,swESP,swCont,swNotif,swPlayer,swXRay,swGhost}
+    for _,s in ipairs(sws) do
+        if s.label then s.label.TextColor3 = t.text end
+        if s.tip   then s.tip.TextColor3   = t.muted end
+        s.set(s.get())
+        s.knob.BackgroundColor3 = Color3.new(1,1,1)
+    end
+    -- buttons
+    btnReset.BackgroundColor3 = t.btnReset
+    btnUnload.BackgroundColor3= t.btnOff
+end
+applyTheme()
+
+-- ===== Estado toggles =====
+local espEnabled      = false
+local contEnabled     = true
+local notifEnabled    = true
+local playerESPEnabled= false
+
+-- ===== Lógica switches =====
+swNight.btn.MouseButton1Click:Connect(function()
+    themeModeNight = not themeModeNight
+    -- re-aplicar tema
+    applyTheme()
+end)
+
+swESP.btn.MouseButton1Click:Connect(function()
+    espEnabled = not espEnabled
+    swESP.set(espEnabled)
+    if espEnabled then startScan(); toast("ESP activado (15s)")
+    else for inst,data in pairs(activeMarks) do safeDestroy(data.hl); activeMarks[inst]=nil end; toast("ESP desactivado") end
+end)
+
+swCont.btn.MouseButton1Click:Connect(function()
     contEnabled = not contEnabled
     swCont.set(contEnabled)
 end)
 
-swNotif.button.MouseButton1Click:Connect(function()
+swNotif.btn.MouseButton1Click:Connect(function()
     notifEnabled = not notifEnabled
     swNotif.set(notifEnabled)
 end)
 
-swPlayer.button.MouseButton1Click:Connect(function()
+swPlayer.btn.MouseButton1Click:Connect(function()
     playerESPEnabled = not playerESPEnabled
     swPlayer.set(playerESPEnabled)
-    if playerESPEnabled then
-        for _,p in ipairs(Players:GetPlayers()) do if p~=LP then createPlayerESP(p) end end
-    else
-        clearPlayerESP()
-    end
+    if playerESPEnabled then for _,p in ipairs(Players:GetPlayers()) do if p~=LP then createPlayerESP(p) end end
+    else clearPlayerESP() end
 end)
 
-swXRay.button.MouseButton1Click:Connect(function()
+swXRay.btn.MouseButton1Click:Connect(function()
     xrayEnabled = not xrayEnabled
     swXRay.set(xrayEnabled)
     if xrayEnabled then enableXRay() else disableXRay() end
 end)
 
-swGhost.button.MouseButton1Click:Connect(function()
+swGhost.btn.MouseButton1Click:Connect(function()
     if ghostEnabled then ghostOff() else ghostOn() end
     swGhost.set(ghostEnabled)
 end)
 
--- ===== Reset / Unload =====
+-- Reset / Unload
 local function RESET_ESP()
-    -- Mantiene estados de switches, solo limpia y reescanea
     for inst,data in pairs(activeMarks) do safeDestroy(data.hl) activeMarks[inst]=nil end
-    -- no borramos everMarked ni brainrotRoots: queremos seguir “solo nuevos” por instancia
-    -- si quieres full reset de memoria, descomenta:
-    -- everMarked = setmetatable({}, {__mode="k"})
-    -- brainrotRoots = setmetatable({}, {__mode="k"})
     if espEnabled then startScan() end
     toast("ESP reseteado")
 end
-
 local function UNLOAD()
     if xrayEnabled   then disableXRay() end
     if ghostEnabled  then ghostOff() end
@@ -669,7 +569,6 @@ local function UNLOAD()
     G.__BRAINROT_ESP_RUNNING = false
     toast("ESP descargado")
 end
-
 btnReset.MouseButton1Click:Connect(RESET_ESP)
 btnUnload.MouseButton1Click:Connect(UNLOAD)
 G.BRAINROT_UNLOAD = UNLOAD
@@ -678,10 +577,9 @@ G.BRAINROT_UNLOAD = UNLOAD
 safeConnect(Players.PlayerAdded, function(p)
     if notifEnabled then playNotificationSound(); toast("🚨 "..p.Name.." se unió") end
     if playerESPEnabled then task.wait(0.25); createPlayerESP(p) end
-    -- recrear ESP player al respawn si está ON
     p.CharacterAdded:Connect(function()
-        if playerESPEnabled then task.wait(0.2)
-            -- limpia y vuelve a crear para asegurar componentes
+        if playerESPEnabled then
+            task.wait(0.2)
             local d = playerESPData[p.UserId]
             if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[p.UserId]=nil end
             createPlayerESP(p)
@@ -692,18 +590,6 @@ safeConnect(Players.PlayerRemoving, function(p)
     local d = playerESPData[p.UserId]
     if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[p.UserId]=nil end
 end)
--- también aplicar a los que ya están
-for _,p in ipairs(Players:GetPlayers()) do
-    if p~=LP then
-        p.CharacterAdded:Connect(function()
-            if playerESPEnabled then task.wait(0.2)
-                local d = playerESPData[p.UserId]
-                if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[p.UserId]=nil end
-                createPlayerESP(p)
-            end
-        end)
-    end
-end
 
 -- ===== Loop =====
 local lastCont = 0
@@ -721,14 +607,11 @@ safeConnect(RunService.Heartbeat, function()
         end
     end
 
-    if playerESPEnabled then
-        updatePlayerESPLines()
-    end
+    if playerESPEnabled then updatePlayerESPLines() end
 
-    -- status live
-    local countBrainrots = 0
-    for _ in pairs(activeMarks) do countBrainrots+=1 end
-    local countPlayers = 0
-    for _ in pairs(playerESPData) do countPlayers+=1 end
-    status.Text = string.format("Brainrots activos: %d  |  Players ESP: %d", countBrainrots, countPlayers)
+    -- status
+    local cB, cP = 0, 0
+    for _ in pairs(activeMarks) do cB+=1 end
+    for _ in pairs(playerESPData) do cP+=1 end
+    status.Text = string.format("Brainrots activos: %d  |  Players ESP: %d", cB, cP)
 end)
