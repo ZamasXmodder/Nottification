@@ -1,26 +1,25 @@
 --// =========================
---//  ESP LITE+ SECURE v1.5.0 (UI+Fix)
---//  Brainrots ESP (15s, sin límite, sólo nuevos) + Notifs + ESP Player PRO
---//  X-Ray (LTM, no revive invisibles, excluye brainrots) + Ghost + Unload
---//  Robust: anti-doble ejecución, pcall/safeConnect, cola BFS incremental
---//  Extras: UI mejorada, tooltips, minimizar, atajos, estados persistentes
+--//  ESP LITE+ SECURE v1.5.1 (UI mount fix + hotkey)
 --// =========================
 
 -- ===== Seguridad / Anti doble ejecución =====
 local G = getgenv and getgenv() or _G
-G.BRAINROT_ESP_VERSION = "1.5.0-secure"
+G.BRAINROT_ESP_VERSION = "1.5.1-secure"
 G.BRAINROT_ESP_NAME    = "ESP_LITE_PLUS_SECURE"
 
+-- Si hay un run previo pero sin GUI, lo limpiamos para evitar early-return infinito
+local CoreGui = game:GetService("CoreGui")
+local priorGui = CoreGui:FindFirstChild("GUI_"..(G.BRAINROT_ESP_NAME or "ESP"))
+if G.__BRAINROT_ESP_RUNNING and not priorGui then
+    G.__BRAINROT_ESP_RUNNING = false
+end
 if G.__BRAINROT_ESP_RUNNING then return end
 G.__BRAINROT_ESP_RUNNING = true
 
 -- ===== Esperar entorno listo (robusto) =====
 local function waitForGameLoaded()
-    -- Espera segura incluso si 'game' no está listo aún
     while not game or not game.IsLoaded do task.wait(0.1) end
-    if not game:IsLoaded() then
-        repeat task.wait(0.1) until game:IsLoaded()
-    end
+    if not game:IsLoaded() then repeat task.wait(0.1) until game:IsLoaded() end
 end
 waitForGameLoaded()
 
@@ -34,6 +33,7 @@ local Players      = safeService("Players")
 local RunService   = safeService("RunService")
 local TweenService = safeService("TweenService")
 local UserInput    = safeService("UserInputService")
+local StarterGui   = safeService("StarterGui")
 
 if not (Players and RunService and TweenService and UserInput) then
     G.__BRAINROT_ESP_RUNNING = false
@@ -43,8 +43,14 @@ end
 local LP = Players.LocalPlayer
 if not LP then repeat task.wait(0.1) until Players.LocalPlayer; LP = Players.LocalPlayer end
 
-local playerGui = LP:FindFirstChildOfClass("PlayerGui") or LP:WaitForChild("PlayerGui", 10)
-if not playerGui then G.__BRAINROT_ESP_RUNNING = false; return end
+-- ===== Parent correcto para UI (gethui/CoreGui) =====
+local function getUiParent()
+    local ok, hui = pcall(function() return gethui and gethui() end)
+    if ok and hui then return hui end
+    -- algunos entornos requieren CoreGui
+    return CoreGui
+end
+local uiParent = getUiParent()
 
 -- ===== Helpers seguros =====
 local function isInstance(x) return typeof(x) == "Instance" end
@@ -57,15 +63,11 @@ local CONNECTIONS = {}
 local function safeConnect(signal, fn)
     local ok, c = pcall(function()
         return signal:Connect(function(...)
-            local ok2, err = pcall(fn, ...)
-            if not ok2 then -- silencioso, pero podrías debuggear si quieres
-            end
+            local ok2 = pcall(fn, ...)
+            if not ok2 then end
         end)
     end)
-    if ok and c then
-        table.insert(CONNECTIONS, c)
-        return c
-    end
+    if ok and c then table.insert(CONNECTIONS, c) return c end
 end
 local function disconnectAll()
     for _,c in ipairs(CONNECTIONS) do pcall(function() c:Disconnect() end) end
@@ -84,7 +86,7 @@ local SCAN_STEP_BUDGET  = 1200
 local CONT_SCAN_PERIOD  = 2
 local PLAYER_LINE_FPS   = 30
 local XRAY_TRANSPARENCY = 0.8
-local TOAST_MIN_DELAY   = 0.4 -- antispam
+local TOAST_MIN_DELAY   = 0.4
 
 -- ===== Targets =====
 local targetNames = {
@@ -101,10 +103,10 @@ local targetSet = {} for _,n in ipairs(targetNames) do targetSet[n]=true end
 
 -- ===== Estado ESP Brainrots =====
 local rainbowHue  = 0
-local everMarked  = setmetatable({}, {__mode="k"})   -- instancia ya marcada (no remarcar)
-local activeMarks = setmetatable({}, {__mode="k"})   -- inst -> {hl, createdAt, baseHue}
+local everMarked  = setmetatable({}, {__mode="k"})
+local activeMarks = setmetatable({}, {__mode="k"})
 
--- Raíces de brainrots (para X-Ray exclusion por ancestro)
+-- Raíces de brainrots
 local brainrotRoots = setmetatable({}, {__mode="k"})
 local function addBrainrotRoot(root) brainrotRoots[root] = true end
 local function hasBrainrotAncestor(obj)
@@ -129,7 +131,7 @@ local function newHighlight(target)
     h.FillTransparency    = 0.45
     h.OutlineTransparency = 0.15
     h.OutlineColor        = Color3.new(1,1,1)
-    h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop -- atraviesa paredes
+    h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
     h.Parent = workspace
     return h
 end
@@ -137,17 +139,13 @@ end
 -- ===== X-RAY (LTM) =====
 local xrayEnabled = false
 local originalLTM = setmetatable({}, {__mode="k"})
-local function shouldIgnore(i)
-    return i:IsDescendantOf(playerGui) or i:IsDescendantOf(Players)
-end
-local function isBrainrotNode(i)
-    return targetSet[i.Name] and (i:IsA("Model") or i:IsA("BasePart"))
-end
+local function shouldIgnore(i) return i:IsDescendantOf(uiParent) or i:IsDescendantOf(Players) end
+local function isBrainrotNode(i) return targetSet[i.Name] and (i:IsA("Model") or i:IsA("BasePart")) end
 local function setLTM(p, v)
     if originalLTM[p] == nil then originalLTM[p] = p.LocalTransparencyModifier end
-    local newVal = p.LocalTransparencyModifier
-    if typeof(newVal) ~= "number" or newVal < 0 or newVal > 1 then newVal = 0 end
-    p.LocalTransparencyModifier = math.max(newVal, v)
+    local cur = p.LocalTransparencyModifier
+    if typeof(cur) ~= "number" or cur < 0 or cur > 1 then cur = 0 end
+    p.LocalTransparencyModifier = math.max(cur, v)
 end
 local function applyXRay(node)
     if shouldIgnore(node) then return end
@@ -166,7 +164,6 @@ end
 local function enableXRay() xrayEnabled = true;  applyXRay(workspace) end
 local function disableXRay() xrayEnabled = false; restoreXRay(workspace) end
 
--- Cuando detectamos un brainrot, le quitamos cualquier LTM previo en todas sus partes
 local function unXrayBrainrot(root)
     if not isValid(root) then return end
     local function restoreTree(n)
@@ -184,11 +181,9 @@ local function markOnce(inst)
     if not isValid(inst) or everMarked[inst] then return end
     if not (inst:IsA("Model") or inst:IsA("BasePart")) then return end
     if not targetSet[inst.Name] then return end
-
     everMarked[inst] = true
     addBrainrotRoot(inst)
     unXrayBrainrot(inst)
-
     local hl = newHighlight(inst)
     hl.FillColor = hsv(rainbowHue)
     activeMarks[inst] = {hl=hl, createdAt=time(), baseHue=rainbowHue}
@@ -200,7 +195,6 @@ local function qpush(x) qt+=1; scanQueue[qt]=x end
 local function qpop() if qh<=qt then local v=scanQueue[qh]; scanQueue[qh]=nil; qh+=1; return v end end
 local function qempty() return qh>qt end
 local function qreset() for i=qh,qt do scanQueue[i]=nil end qh,qt=1,0 end
-
 local function processScanStep()
     local budget = SCAN_STEP_BUDGET
     while budget>0 do
@@ -214,14 +208,14 @@ local function processScanStep()
         budget-=1
     end
 end
-
 local function startScan() qreset(); qpush(workspace) end
 
 -- ===== Notificaciones (reutilizables) =====
 local toastGui = Instance.new("ScreenGui")
 toastGui.Name = "Toast_"..G.BRAINROT_ESP_NAME
 toastGui.ResetOnSpawn = false
-toastGui.Parent = playerGui
+toastGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+toastGui.Parent = uiParent
 
 local toastFrameTemplate
 do
@@ -246,11 +240,10 @@ end
 
 local lastToast = 0
 local notifSound = Instance.new("Sound")
-notifSound.SoundId = "rbxassetid://77665577458181" -- si no existe, no explota
+notifSound.SoundId = "rbxassetid://77665577458181"
 notifSound.Volume  = 0.7
 notifSound.Parent  = toastGui
 local function playNotificationSound() pcall(function() notifSound:Play() end) end
-
 local function toast(msg, duration)
     local now = time()
     if now - lastToast < TOAST_MIN_DELAY then return end
@@ -271,18 +264,14 @@ end
 local linePool = {}
 local function getLine()
     local l = table.remove(linePool)
-    if l then 
-        l.Parent = workspace
-        return l 
-    end
+    if l then l.Parent = workspace; return l end
     l = Instance.new("Part")
     l.Name = "PlayerESPLine"
-    l.Anchored = true
-    l.CanCollide = false
-    l.Size = Vector3.new(0.25, 0.25, 1)     -- más gruesa
-    l.Material = Enum.Material.ForceField   -- visible a través
-    l.Color = Color3.fromRGB(255, 0, 0)     -- rojo intenso
-    l.Transparency = 0.1                    -- efecto glow
+    l.Anchored, l.CanCollide = true, false
+    l.Size = Vector3.new(0.25, 0.25, 1)
+    l.Material = Enum.Material.ForceField
+    l.Color = Color3.fromRGB(255, 0, 0)
+    l.Transparency = 0.1
     l.Parent = workspace
     return l
 end
@@ -316,32 +305,25 @@ local function makeBillboard(targetPlayer)
 end
 
 local playerESPEnabled = loadFlag("playerESPEnabled", false)
-local playerESPData = {} -- uid -> {p, hl, line, bb, lbl}
-
+local playerESPData = {}
 local lastPEspUpd = 0
 local function createPlayerESP(p)
     if p==LP or playerESPData[p.UserId] then return end
     local char=p.Character if not char then return end
     local hrp=char:FindFirstChild("HumanoidRootPart") if not hrp then return end
-
     local hl = newHighlight(char); hl.FillColor=Color3.new(1,0,0)
     local line = getLine()
     local bb, lbl = makeBillboard(p)
     bb.Adornee = hrp
     bb.Parent = workspace
-
     playerESPData[p.UserId] = {p=p, hl=hl, line=line, bb=bb, lbl=lbl}
 end
-
 local function clearPlayerESP()
     for _,d in pairs(playerESPData) do
-        safeDestroy(d.hl)
-        freeLine(d.line)
-        safeDestroy(d.bb)
+        safeDestroy(d.hl); freeLine(d.line); safeDestroy(d.bb)
     end
     table.clear(playerESPData)
 end
-
 local function updatePlayerESPLines()
     local now = time()
     if now - lastPEspUpd < 1/PLAYER_LINE_FPS then return end
@@ -358,7 +340,7 @@ local function updatePlayerESPLines()
             local tpos = hrp.Position
             local dir  = tpos - myPos
             local dist = dir.Magnitude
-            if not dist or dist ~= dist or dist <= 0 then dist = 0.1 end -- NaN/neg fix
+            if not dist or dist ~= dist or dist <= 0 then dist = 0.1 end
             d.line.Size   = Vector3.new(0.25, 0.25, dist)
             d.line.CFrame = CFrame.lookAt(myPos + dir*0.5, tpos)
             if d.bb.Adornee ~= hrp then d.bb.Adornee = hrp end
@@ -371,7 +353,7 @@ local function updatePlayerESPLines()
     end
 end
 
--- ===== Ghost (70%) =====
+-- ===== Ghost =====
 local ghostEnabled = loadFlag("ghostEnabled", false)
 local function setCharTransp(char,t)
     for _,d in ipairs(char:GetDescendants()) do
@@ -387,7 +369,8 @@ safeConnect(LP.CharacterAdded, function(c) task.wait(0.2); if ghostEnabled then 
 local gui = Instance.new("ScreenGui")
 gui.Name = "GUI_"..G.BRAINROT_ESP_NAME
 gui.ResetOnSpawn = false
-gui.Parent = playerGui
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = uiParent
 
 -- Contenedor
 local f = Instance.new("Frame")
@@ -398,7 +381,7 @@ f.Active = true
 f.Parent = gui
 Instance.new("UICorner", f).CornerRadius = UDim.new(0,10)
 
--- Header con degradado animado
+-- Header
 local header = Instance.new("Frame")
 header.Size = UDim2.new(1,0,0,38)
 header.BackgroundColor3 = Color3.fromRGB(45,45,45)
@@ -427,7 +410,7 @@ minBtn.Font = Enum.Font.GothamBold
 minBtn.Parent = header
 Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0,6)
 
--- Arrastrable suave
+-- Arrastrable
 do
     local dragging, dragStart, startPos
     safeConnect(header.InputBegan, function(input)
@@ -487,7 +470,7 @@ local function makeBtn(y, txt, col, tipText)
     b.Parent = container
     Instance.new("UICorner", b).CornerRadius = UDim.new(0,8)
 
-    -- tooltip simple
+    -- tooltip
     local tip = Instance.new("TextLabel")
     tip.Visible = false
     tip.BackgroundColor3 = Color3.fromRGB(20,20,20)
@@ -495,7 +478,7 @@ local function makeBtn(y, txt, col, tipText)
     tip.Text = tipText or ""
     tip.Font = Enum.Font.Gotham
     tip.TextScaled = true
-    tip.Size = UDim2.new(0, math.max(160, (#tipText)*6), 0, 28)
+    tip.Size = UDim2.new(0, math.max(160, (tipText and #tipText or 0)*6), 0, 28)
     tip.Position = UDim2.new(0, 8, 0, -34)
     tip.Parent = container
     Instance.new("UICorner", tip).CornerRadius = UDim.new(0,6)
@@ -514,16 +497,26 @@ local xBtn     = makeBtn(y0+176, "X-RAY MAP: OFF",            Color3.fromRGB(200
 local gBtn     = makeBtn(y0+220, "GHOST (Yo): OFF",           Color3.fromRGB(200,60,60),  "Te vuelves 70% transparente")
 local uBtn     = makeBtn(y0+264, "UNLOAD / SALIR",            Color3.fromRGB(80,80,80),   "Desinstala todo y cierra")
 
--- ===== Estado toggles (persistentes) =====
+-- ===== Estado toggles =====
 local espEnabled   = loadFlag("espEnabled",  false)
 local contEnabled  = loadFlag("contEnabled", true)
 local notifEnabled = loadFlag("notifEnabled", true)
+local playerESPEnabled = loadFlag("playerESPEnabled", false)
+local ghostEnabledFlag = loadFlag("ghostEnabled", false)
 
-local function setBtn(b,on)
-    b.BackgroundColor3 = on and Color3.fromRGB(60,200,60) or Color3.fromRGB(200,60,60)
+local function setBtn(b,on) b.BackgroundColor3 = on and Color3.fromRGB(60,200,60) or Color3.fromRGB(200,60,60) end
+local function refreshUI()
+    setBtn(espBtn, espEnabled);   espBtn.Text   = espEnabled   and "ESP: ON"                 or "ESP: OFF"
+    setBtn(contBtn,contEnabled);  contBtn.Text  = contEnabled  and "Búsqueda Continua: ON"   or "Búsqueda Continua: OFF"
+    setBtn(notifBtn,notifEnabled);notifBtn.Text = notifEnabled and "Notificaciones: ON"      or "Notificaciones: OFF"
+    setBtn(pBtn,    playerESPEnabled); pBtn.Text= playerESPEnabled and "ESP Player: ON"       or "ESP Player: OFF"
+    setBtn(xBtn,    xrayEnabled); xBtn.Text     = xrayEnabled  and "X-RAY MAP: ON"           or "X-RAY MAP: OFF"
+    setBtn(gBtn,    ghostEnabled); gBtn.Text    = ghostEnabled and "GHOST (Yo): ON"          or "GHOST (Yo): OFF"
 end
 
+-- minimizar + mostrar/ocultar
 local minimized = false
+local hidden = false
 local function setMinimized(m)
     minimized = m
     if minimized then
@@ -536,19 +529,14 @@ local function setMinimized(m)
         minBtn.Text = "-"
     end
 end
-
 safeConnect(minBtn.MouseButton1Click, function() setMinimized(not minimized) end)
 
--- ===== Botones =====
-local function refreshUI()
-    setBtn(espBtn, espEnabled);   espBtn.Text   = espEnabled   and "ESP: ON"                 or "ESP: OFF"
-    setBtn(contBtn,contEnabled);  contBtn.Text  = contEnabled  and "Búsqueda Continua: ON"   or "Búsqueda Continua: OFF"
-    setBtn(notifBtn,notifEnabled);notifBtn.Text = notifEnabled and "Notificaciones: ON"      or "Notificaciones: OFF"
-    setBtn(pBtn,    playerESPEnabled); pBtn.Text= playerESPEnabled and "ESP Player: ON"       or "ESP Player: OFF"
-    setBtn(xBtn,    xrayEnabled); xBtn.Text     = xrayEnabled  and "X-RAY MAP: ON"           or "X-RAY MAP: OFF"
-    setBtn(gBtn,    ghostEnabled); gBtn.Text    = ghostEnabled and "GHOST (Yo): ON"          or "GHOST (Yo): OFF"
+local function setHidden(h)
+    hidden = h
+    gui.Enabled = not hidden
 end
 
+-- ===== Botones =====
 safeConnect(espBtn.MouseButton1Click, function()
     espEnabled = not espEnabled
     saveFlag("espEnabled", espEnabled)
@@ -609,13 +597,11 @@ local function UNLOAD()
     disconnectAll()
     safeDestroy(gui)
     safeDestroy(toastGui)
-    -- Restaura cualquier LTM que quedara suelto por seguridad
     pcall(function() restoreXRay(workspace) end)
     G.__BRAINROT_ESP_RUNNING = false
-    toast("ESP descargado", 2.0)
 end
 safeConnect(uBtn.MouseButton1Click, UNLOAD)
-G.BRAINROT_UNLOAD = UNLOAD -- para loaders externos
+G.BRAINROT_UNLOAD = UNLOAD
 
 -- ===== Eventos jugadores =====
 safeConnect(Players.PlayerAdded, function(p)
@@ -627,9 +613,10 @@ safeConnect(Players.PlayerRemoving, function(p)
     if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[p.UserId]=nil end
 end)
 
--- ===== Atajos =====
+-- ===== Hotkeys =====
 safeConnect(UserInput.InputBegan, function(input, gp)
     if gp then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then setHidden(not hidden) end -- mostrar/ocultar panel
     if input.KeyCode == Enum.KeyCode.M then setMinimized(not minimized) end
     if input.KeyCode == Enum.KeyCode.E then espBtn:Activate() end
     if input.KeyCode == Enum.KeyCode.X then xBtn:Activate() end
@@ -641,14 +628,11 @@ end)
 -- ===== Loop =====
 local lastCont = 0
 safeConnect(RunService.Heartbeat, function(dt)
-    -- Header con degradado arcoíris
     rainbowHue = (rainbowHue + (dt*0.25)) % 1
-    local col = hsv(rainbowHue)
-    header.BackgroundColor3 = Color3.new(col.R*0.5+0.3, col.G*0.5+0.3, col.B*0.5+0.3)
+    header.BackgroundColor3 = Color3.fromHSV(rainbowHue, 0.5, 0.8)
 
     if espEnabled then
         processScanStep()
-        -- Colores dinámicos en highlights
         for inst, data in pairs(activeMarks) do
             local hl = data.hl
             if isValid(hl) then
@@ -656,7 +640,6 @@ safeConnect(RunService.Heartbeat, function(dt)
                 hl.FillColor = hsv(hue)
             end
         end
-        -- Limpieza expirados
         local now = time()
         for inst, data in pairs(activeMarks) do
             if (now - data.createdAt) >= MARK_DURATION or not isValid(inst) then
@@ -676,20 +659,18 @@ safeConnect(RunService.Heartbeat, function(dt)
     end
 end)
 
--- ===== Nuevos objetos en el mapa (después de loop para asegurar handlers) =====
+-- ===== Nuevos objetos en el mapa =====
 safeConnect(workspace.DescendantAdded, function(i)
-    -- X-Ray: no tocar descendientes de brainrots ni Players/UI ni terrain
     if xrayEnabled and i:IsA("BasePart") and not shouldIgnore(i) and not hasBrainrotAncestor(i) and not isBrainrotNode(i) then
         setLTM(i, XRAY_TRANSPARENCY)
     end
-    -- ESP: marcar si es brainrot válido
     if isBrainrotNode(i) and targetSet[i.Name] then
         markOnce(i)
     end
 end)
 
--- Ajuste de UI inicial
+-- ===== Inicialización =====
 refreshUI()
--- Si el usuario tenía flags activos al cargar, aplicamos
+toast("ESP LITE+ cargado • RightShift para mostrar/ocultar", 3.5)
 if playerESPEnabled then for _,p in ipairs(Players:GetPlayers()) do if p~=LP then createPlayerESP(p) end end end
-if ghostEnabled then ghostOn() end
+if ghostEnabledFlag then ghostOn() end
