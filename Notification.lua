@@ -1,14 +1,14 @@
 --// =========================
---//  ESP LITE+ SECURE v1.8.0
+--//  ESP LITE+ SECURE v1.8.1
 --//  Brainrots ESP core (igual) + líneas y highlight oscuros por nombre específico
 --//  Player ESP PRO + Notifs + X-Ray + Ghost + Reset + Unload
---//  UI pro (gradiente, sombras, strokes) + Tema Noche/Día + tecla [T] para mostrar/ocultar
+--//  UI pro (gradiente, sombras, strokes) + Tema Noche/Día + tecla [T] + SCROLL vertical
 --//  Robust: anti-doble ejecución, pcall/safeConnect, BFS incremental, recreación segura
 --// =========================
 
 -- ===== Seguridad / Anti doble ejecución =====
 local G = getgenv and getgenv() or _G
-G.BRAINROT_ESP_VERSION = "1.8.0-secure"
+G.BRAINROT_ESP_VERSION = "1.8.1-secure"
 G.BRAINROT_ESP_NAME    = "ESP_LITE_PLUS_SECURE"
 if G.__BRAINROT_ESP_RUNNING then return end
 G.__BRAINROT_ESP_RUNNING = true
@@ -201,7 +201,6 @@ local function getWorldPos(obj)
         if pp and isValid(pp) then return pp.Position end
         local ok, cf, size = pcall(obj.GetBoundingBox, obj)
         if ok and cf then return cf.Position end
-        -- fallback: buscar la primera BasePart válida
         for _,d in ipairs(obj:GetDescendants()) do
             if d:IsA("BasePart") then return d.Position end
         end
@@ -232,14 +231,12 @@ local function markOnce(inst)
     -- ==== ADICIÓN: línea + highlight OSCURO por nombre específico ====
     local spec = specialDarkMap[inst.Name]
     if spec then
-        -- Forzar highlight oscuro específico
         if isValid(hl) then
             hl.FillTransparency    = 0.55
             hl.OutlineTransparency = 0.05
             hl.OutlineColor        = Color3.fromRGB(10,10,12)
             hl.FillColor           = spec.fill
         end
-        -- Crear línea dedicada
         local L = getLine()
         L.Color = spec.line
         L.Material = Enum.Material.Neon
@@ -248,7 +245,7 @@ local function markOnce(inst)
     end
 end
 
--- BFS incremental
+-- ===== BFS incremental =====
 local scanQueue, qh, qt = {}, 1, 0
 local function qpush(x) qt+=1; scanQueue[qt]=x end
 local function qpop() if qh<=qt then local v=scanQueue[qh]; scanQueue[qh]=nil; qh+=1; return v end end
@@ -280,19 +277,17 @@ safeConnect(workspace.DescendantAdded, function(i)
     end
 end)
 
--- Mantenimiento ESP
+-- ===== Mantenimiento ESP =====
 local function cleanupExpired()
     local now = time()
     for inst, data in pairs(activeMarks) do
         if (now - data.createdAt) >= MARK_DURATION or not isValid(inst) then
             safeDestroy(data.hl)
             activeMarks[inst] = nil
-            -- limpiar línea especial si existía
             local s = specialBrainrotLines[inst]
             if s then freeLine(s.line) specialBrainrotLines[inst] = nil end
         end
     end
-    -- también limpiar líneas cuyo objetivo haya muerto/quitado
     for inst, s in pairs(specialBrainrotLines) do
         if not isValid(inst) or not activeMarks[inst] then
             freeLine(s.line); specialBrainrotLines[inst] = nil
@@ -303,7 +298,6 @@ local function updateColors()
     for inst, data in pairs(activeMarks) do
         local hl = data.hl
         if isValid(hl) then
-            -- si es especial, respetamos su color oscuro (no arcoiris)
             if not specialDarkMap[inst.Name] then
                 local hue = (data.baseHue + (time()-data.createdAt)*RAINBOW_SPEED)%1
                 hl.FillColor = hsv(hue)
@@ -520,7 +514,7 @@ local function disableGameNight()
     for k, v in pairs(_origLighting) do pcall(function() Lighting[k] = v end) end
 end
 
--- ===== GUI PRO (gradiente, sombras, strokes, toggle con T) =====
+-- ===== GUI PRO (gradiente, sombras, strokes, toggle con T, con SCROLL) =====
 local gui = Instance.new("ScreenGui"); gui.Name="GUI_"..G.BRAINROT_ESP_NAME; gui.ResetOnSpawn=false; gui.Parent=playerGui
 
 local main = Instance.new("Frame"); main.Size=UDim2.new(0,300,0,520); main.Position=UDim2.new(1,-310,0,12); main.Active=true; main.Draggable=true; main.Parent=gui
@@ -540,9 +534,39 @@ minimize.Size=UDim2.new(0,34,0,34); minimize.Position=UDim2.new(1,-42,0.5,-17); 
 minimize.Font=Enum.Font.GothamBold; minimize.TextScaled=true; minimize.TextColor3=Color3.fromRGB(255,255,255); minimize.BackgroundTransparency=0.15; minimize.Parent=header
 Instance.new("UICorner", minimize).CornerRadius = UDim.new(0,8)
 
-local body = Instance.new("Frame"); body.Size=UDim2.new(1,-22,1,-120); body.Position=UDim2.new(0,11,0,64); body.Parent=main
-local pad = Instance.new("UIPadding"); pad.PaddingTop=UDim.new(0,8); pad.PaddingBottom=UDim.new(0,8); pad.PaddingLeft=UDim.new(0,8); pad.PaddingRight=UDim.new(0,8); pad.Parent=body
-local list = Instance.new("UIListLayout"); list.SortOrder=Enum.SortOrder.LayoutOrder; list.Padding = UDim.new(0,10); list.Parent=body
+-- Scrolling body (ruedita + swipe)
+local body = Instance.new("ScrollingFrame")
+body.Size      = UDim2.new(1,-22,1,-120)
+body.Position  = UDim2.new(0,11,0,64)
+body.Parent    = main
+body.Active    = true
+body.ScrollingEnabled   = true
+body.ScrollingDirection = Enum.ScrollingDirection.Y
+body.CanvasSize         = UDim2.new(0,0,0,0)
+local hasAuto = pcall(function() body.AutomaticCanvasSize = Enum.AutomaticSize.Y end)
+body.ScrollBarThickness = 6
+body.ScrollBarImageTransparency = 0.2
+body.ScrollBarImageColor3 = Color3.fromRGB(120,120,140)
+
+local pad = Instance.new("UIPadding")
+pad.PaddingTop    = UDim.new(0,8)
+pad.PaddingBottom = UDim.new(0,8)
+pad.PaddingLeft   = UDim.new(0,8)
+pad.PaddingRight  = UDim.new(0,8)
+pad.Parent        = body
+
+local list = Instance.new("UIListLayout")
+list.SortOrder = Enum.SortOrder.LayoutOrder
+list.Padding   = UDim.new(0,10)
+list.Parent    = body
+
+if not hasAuto then
+    local function updateCanvas()
+        body.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 16)
+    end
+    list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
+    task.defer(updateCanvas)
+end
 
 local status = Instance.new("TextLabel")
 status.BackgroundTransparency=1; status.Size=UDim2.new(1,-22,0,24); status.Position=UDim2.new(0,11,1,-30)
@@ -597,7 +621,7 @@ local swCont      = makeSwitch("Búsqueda continua", true, "Refuerza el escaneo 
 local swNotif     = makeSwitch("Notificaciones", true, "Alerta al entrar jugadores")
 local swPlayer    = makeSwitch("ESP de jugadores", false, "Línea + nombre + distancia + highlight")
 local swXRay      = makeSwitch("X-RAY del mapa (80%)", false, "Oculta mapa sin afectar brainrots")
-local swGhost     = makeSwitch("Ghost (Yo 70%)", false, "Tu personaje más transparente")
+local swGhost     = makeSwitch("Espíritu (Yo 70%)", false, "Tu personaje más transparente")
 
 local btnReset  = makeButton("RESET ESP", Color3.fromRGB(70,110,255), 200)
 local btnUnload = makeButton("UNLOAD",    Color3.fromRGB(90,90,95),  201)
@@ -633,7 +657,7 @@ local function applyTheme()
     title.TextColor3        = t.text
     minimize.TextColor3     = Color3.fromRGB(255,255,255)
     status.TextColor3       = t.muted
-    header.BackgroundColor3 = t.headerBg -- queda cubierto por gradiente; mantiene base
+    header.BackgroundColor3 = t.headerBg
     local sws = {swNight, swGameNight, swESP, swCont, swNotif, swPlayer, swXRay, swGhost}
     for _,s in ipairs(sws) do
         if s.label then s.label.TextColor3 = t.text end
@@ -704,7 +728,7 @@ swGhost.btn.MouseButton1Click:Connect(function()
     swGhost.set(ghostEnabled)
 end)
 
--- Reset / Unload
+-- ===== Reset / Unload =====
 local function RESET_ESP()
     for inst,data in pairs(activeMarks) do safeDestroy(data.hl) activeMarks[inst]=nil end
     for inst,s in pairs(specialBrainrotLines) do freeLine(s.line) specialBrainrotLines[inst]=nil end
@@ -770,7 +794,7 @@ safeConnect(RunService.Heartbeat, function()
             lastCont = time()
             qpush(workspace)
         end
-        -- ===== Actualización de líneas de brainrots especiales =====
+        -- Actualización de líneas de brainrots especiales
         local myHRP = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
         if myHRP then
             local myPos = myHRP.Position
@@ -794,7 +818,6 @@ safeConnect(RunService.Heartbeat, function()
 
     if playerESPEnabled then updatePlayerESPLines() end
 
-    -- status
     local cB, cP = 0, 0
     for _ in pairs(activeMarks) do cB+=1 end
     for _ in pairs(playerESPData) do cP+=1 end
