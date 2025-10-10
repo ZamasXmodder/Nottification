@@ -1,14 +1,14 @@
 --// =========================
---//  ESP LITE+ SECURE v1.7.0
---//  Brainrots ESP (15s, sin límite) + Notifs + ESP Player PRO (línea gruesa + nombre/distancia)
---//  X-Ray (LTM, no revive invisibles, excluye brainrots) + Ghost + Reset + Unload
---//  GUI mejorada (layout limpio, switches) + Tema UI Noche/Día + Modo Noche (Juego)
+--//  ESP LITE+ SECURE v1.8.0
+--//  Brainrots ESP core (igual) + líneas y highlight oscuros por nombre específico
+--//  Player ESP PRO + Notifs + X-Ray + Ghost + Reset + Unload
+--//  UI pro (gradiente, sombras, strokes) + Tema Noche/Día + tecla [T] para mostrar/ocultar
 --//  Robust: anti-doble ejecución, pcall/safeConnect, BFS incremental, recreación segura
 --// =========================
 
 -- ===== Seguridad / Anti doble ejecución =====
 local G = getgenv and getgenv() or _G
-G.BRAINROT_ESP_VERSION = "1.7.0-secure"
+G.BRAINROT_ESP_VERSION = "1.8.0-secure"
 G.BRAINROT_ESP_NAME    = "ESP_LITE_PLUS_SECURE"
 if G.__BRAINROT_ESP_RUNNING then return end
 G.__BRAINROT_ESP_RUNNING = true
@@ -29,8 +29,9 @@ local Players      = safeService("Players")
 local RunService   = safeService("RunService")
 local TweenService = safeService("TweenService")
 local Lighting     = safeService("Lighting")
+local UserInput    = safeService("UserInputService")
 
-if not (Players and RunService and TweenService and Lighting) then
+if not (Players and RunService and TweenService and Lighting and UserInput) then
     G.__BRAINROT_ESP_RUNNING = false
     return
 end
@@ -82,6 +83,22 @@ local targetNames = {
     "Garama and Madundung","Dragon Cannelloni","Celularcini Viciosini"
 }
 local targetSet = {} for _,n in ipairs(targetNames) do targetSet[n]=true end
+
+-- ===== Colores oscuros por brainrot (línea + highlight) =====
+local specialDarkMap = {
+    ["La Secret Combinasion"] = {line=Color3.fromRGB(40, 40, 55),  fill=Color3.fromRGB(35,35,48)},
+    ["Burguro And Fryuro"]    = {line=Color3.fromRGB(60, 40, 40),  fill=Color3.fromRGB(52,32,32)},
+    ["Tang Tang Kelentang"]   = {line=Color3.fromRGB(30, 55, 50),  fill=Color3.fromRGB(24,46,42)},
+    ["Strawberry Elephant"]   = {line=Color3.fromRGB(55, 35, 45),  fill=Color3.fromRGB(46,28,38)},
+    ["Ketchuru and Musturu"]  = {line=Color3.fromRGB(55, 45, 30),  fill=Color3.fromRGB(44,36,24)},
+    ["Tictac Sahur"]          = {line=Color3.fromRGB(35, 45, 60),  fill=Color3.fromRGB(28,36,50)},
+    ["Nuclearo Dinosauro"]    = {line=Color3.fromRGB(45, 60, 45),  fill=Color3.fromRGB(36,50,36)},
+    ["Tralaledon"]            = {line=Color3.fromRGB(50, 35, 55),  fill=Color3.fromRGB(40,28,44)},
+    ["Ketupat Kepat"]         = {line=Color3.fromRGB(45, 50, 35),  fill=Color3.fromRGB(36,40,28)},
+    ["La Supreme Combinasion"]= {line=Color3.fromRGB(60, 50, 35),  fill=Color3.fromRGB(48,40,28)},
+    ["Garama and Madundung"]  = {line=Color3.fromRGB(35, 55, 60),  fill=Color3.fromRGB(28,46,50)},
+    ["Dragon Cannelloni"]     = {line=Color3.fromRGB(60, 35, 35),  fill=Color3.fromRGB(50,28,28)},
+}
 
 -- ===== Estado ESP Brainrots =====
 local rainbowHue  = 0
@@ -157,7 +174,47 @@ local function unXrayBrainrot(root)
     restoreTree(root)
 end
 
+-- ===== Line pool (reutilizable para players y brainrots) =====
+local linePool = {}
+local function getLine()
+    local l = table.remove(linePool)
+    if l then l.Parent = workspace; return l end
+    l = Instance.new("Part")
+    l.Name = "ESPLine"
+    l.Anchored = true
+    l.CanCollide = false
+    l.Size = Vector3.new(0.25, 0.25, 1)
+    l.Material = Enum.Material.ForceField
+    l.Color = Color3.fromRGB(255, 0, 0)
+    l.Transparency = 0.1
+    l.Parent = workspace
+    return l
+end
+local function freeLine(l) if l then l.Parent=nil table.insert(linePool,l) end end
+
+-- ===== Util para obtener posición de un objetivo =====
+local function getWorldPos(obj)
+    if not isValid(obj) then return nil end
+    if obj:IsA("BasePart") then return obj.Position end
+    if obj:IsA("Model") then
+        local pp = obj.PrimaryPart
+        if pp and isValid(pp) then return pp.Position end
+        local ok, cf, size = pcall(obj.GetBoundingBox, obj)
+        if ok and cf then return cf.Position end
+        -- fallback: buscar la primera BasePart válida
+        for _,d in ipairs(obj:GetDescendants()) do
+            if d:IsA("BasePart") then return d.Position end
+        end
+    end
+    return nil
+end
+
+-- ===== Nuevas estructuras: líneas/colores para brainrots especiales =====
+-- inst -> {line=Part, color=Color3}
+local specialBrainrotLines = setmetatable({}, {__mode="k"})
+
 -- ===== Detección/Marcado Brainrots =====
+-- *** RESPETA la función original y SOLO ADICIONA lo pedido ***
 local function markOnce(inst)
     if not isValid(inst) or everMarked[inst] then return end
     if not (inst:IsA("Model") or inst:IsA("BasePart")) then return end
@@ -167,9 +224,28 @@ local function markOnce(inst)
     addBrainrotRoot(inst)
     unXrayBrainrot(inst)
 
+    -- Highlight base (igual que antes)
     local hl = newHighlight(inst)
     hl.FillColor = hsv(rainbowHue)
     activeMarks[inst] = {hl=hl, createdAt=time(), baseHue=rainbowHue}
+
+    -- ==== ADICIÓN: línea + highlight OSCURO por nombre específico ====
+    local spec = specialDarkMap[inst.Name]
+    if spec then
+        -- Forzar highlight oscuro específico
+        if isValid(hl) then
+            hl.FillTransparency    = 0.55
+            hl.OutlineTransparency = 0.05
+            hl.OutlineColor        = Color3.fromRGB(10,10,12)
+            hl.FillColor           = spec.fill
+        end
+        -- Crear línea dedicada
+        local L = getLine()
+        L.Color = spec.line
+        L.Material = Enum.Material.Neon
+        L.Transparency = 0.15
+        specialBrainrotLines[inst] = {line=L, color=spec.line}
+    end
 end
 
 -- BFS incremental
@@ -211,6 +287,15 @@ local function cleanupExpired()
         if (now - data.createdAt) >= MARK_DURATION or not isValid(inst) then
             safeDestroy(data.hl)
             activeMarks[inst] = nil
+            -- limpiar línea especial si existía
+            local s = specialBrainrotLines[inst]
+            if s then freeLine(s.line) specialBrainrotLines[inst] = nil end
+        end
+    end
+    -- también limpiar líneas cuyo objetivo haya muerto/quitado
+    for inst, s in pairs(specialBrainrotLines) do
+        if not isValid(inst) or not activeMarks[inst] then
+            freeLine(s.line); specialBrainrotLines[inst] = nil
         end
     end
 end
@@ -218,8 +303,11 @@ local function updateColors()
     for inst, data in pairs(activeMarks) do
         local hl = data.hl
         if isValid(hl) then
-            local hue = (data.baseHue + (time()-data.createdAt)*RAINBOW_SPEED)%1
-            hl.FillColor = hsv(hue)
+            -- si es especial, respetamos su color oscuro (no arcoiris)
+            if not specialDarkMap[inst.Name] then
+                local hue = (data.baseHue + (time()-data.createdAt)*RAINBOW_SPEED)%1
+                hl.FillColor = hsv(hue)
+            end
         end
     end
 end
@@ -230,52 +318,48 @@ notifSound.SoundId = "rbxassetid://77665577458181"
 notifSound.Volume  = 0.7
 notifSound.Parent  = playerGui
 local function playNotificationSound() pcall(function() notifSound:Play() end) end
-local function toast(msg)
+local function toast(msg, tColor)
     local gui = Instance.new("ScreenGui")
     gui.Name = "Toast_"..G.BRAINROT_ESP_NAME
     gui.Parent = playerGui
     local f = Instance.new("Frame")
-    f.Size = UDim2.new(0,320,0,80)
-    f.Position = UDim2.new(0.5,-160,1,-90)
-    f.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    f.Size = UDim2.new(0,340,0,84)
+    f.Position = UDim2.new(0.5,-170,1,-100)
+    f.BackgroundColor3 = Color3.fromRGB(24,24,28)
     f.BorderSizePixel = 0
     f.Parent = gui
+    local stroke = Instance.new("UIStroke"); stroke.Thickness=2; stroke.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; stroke.Color = tColor or Color3.fromRGB(80,120,255); stroke.Parent=f
+    local shadow = Instance.new("ImageLabel"); shadow.Name="Shadow"; shadow.BackgroundTransparency=1; shadow.Image="rbxassetid://1316045217"
+    shadow.ScaleType = Enum.ScaleType.Slice; shadow.SliceCenter = Rect.new(10,10,118,118); shadow.ImageTransparency=0.5
+    shadow.Size=UDim2.new(1,30,1,30); shadow.Position=UDim2.new(0,-15,0,-15); shadow.ZIndex=0; shadow.Parent=f
     local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0,10) c.Parent = f
     local l = Instance.new("TextLabel")
     l.BackgroundTransparency = 1
-    l.Size = UDim2.new(1,-20,1,-20)
-    l.Position = UDim2.new(0,10,0,10)
+    l.Size = UDim2.new(1,-24,1,-22)
+    l.Position = UDim2.new(0,12,0,11)
     l.Text = msg
     l.TextScaled = true
     l.TextColor3 = Color3.new(1,1,1)
-    l.Font = Enum.Font.Gotham
+    l.Font = Enum.Font.GothamSemibold
     l.Parent = f
-    f.Position = UDim2.new(0.5,-160,1,0)
-    TweenService:Create(f,TweenInfo.new(0.3, Enum.EasingStyle.Back),{Position=UDim2.new(0.5,-160,1,-90)}):Play()
+    f.Position = UDim2.new(0.5,-170,1,0)
+    TweenService:Create(f,TweenInfo.new(0.28, Enum.EasingStyle.Back),{Position=UDim2.new(0.5,-170,1,-100)}):Play()
     task.delay(3.0, function()
-        local tw = TweenService:Create(f,TweenInfo.new(0.25),{Position=UDim2.new(0.5,-160,1,0)})
+        local tw = TweenService:Create(f,TweenInfo.new(0.25),{Position=UDim2.new(0.5,-170,1,0)})
         tw:Play()
         tw.Completed:Once(function() safeDestroy(gui) end)
     end)
 end
 
 -- ===== Player ESP PRO =====
-local linePool = {}
-local function getLine()
-    local l = table.remove(linePool)
-    if l then l.Parent = workspace; return l end
-    l = Instance.new("Part")
-    l.Name = "PlayerESPLine"
-    l.Anchored = true
-    l.CanCollide = false
-    l.Size = Vector3.new(0.25, 0.25, 1)
-    l.Material = Enum.Material.ForceField
-    l.Color = Color3.fromRGB(255, 0, 0)
-    l.Transparency = 0.1
-    l.Parent = workspace
-    return l
+local playerESPEnabled=false
+-- uid -> {p, hl, line, bb, lbl}
+local playerESPData={}
+local lastPEspUpd = 0
+
+local function newHighlightPlayer(char)
+    local h = newHighlight(char); h.FillColor = Color3.new(1,0,0); return h
 end
-local function freeLine(l) if l then l.Parent=nil table.insert(linePool,l) end end
 
 local function makeBillboard(targetPlayer)
     local bb = Instance.new("BillboardGui")
@@ -284,19 +368,11 @@ local function makeBillboard(targetPlayer)
     bb.Size = UDim2.fromOffset(180, 42)
     bb.StudsOffsetWorldSpace = Vector3.new(0, 3.2, 0)
     bb.MaxDistance = 3000
-    local holder = Instance.new("Frame"); holder.Name="Holder"; holder.BackgroundColor3 = Color3.fromRGB(25,25,25); holder.BackgroundTransparency=0.25; holder.Size = UDim2.fromScale(1,1); holder.Parent = bb
+    local holder = Instance.new("Frame"); holder.Name="Holder"; holder.BackgroundColor3 = Color3.fromRGB(22,22,26); holder.BackgroundTransparency=0.18; holder.Size = UDim2.fromScale(1,1); holder.Parent = bb
     local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0,6); corner.Parent = holder
-    local label = Instance.new("TextLabel"); label.Name="Text"; label.BackgroundTransparency=1; label.Size=UDim2.fromScale(1,1); label.TextScaled=true; label.Font=Enum.Font.GothamBold; label.TextColor3=Color3.new(1,1,1); label.TextStrokeTransparency=0.3; label.TextXAlignment = Enum.TextXAlignment.Center; label.Text = targetPlayer.Name; label.Parent = holder
+    local stroke = Instance.new("UIStroke"); stroke.Thickness=1.5; stroke.Color=Color3.fromRGB(70,70,80); stroke.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; stroke.Parent=holder
+    local label = Instance.new("TextLabel"); label.Name="Text"; label.BackgroundTransparency=1; label.Size=UDim2.fromScale(1,1); label.TextScaled=true; label.Font=Enum.Font.GothamBold; label.TextColor3=Color3.new(1,1,1); label.TextStrokeTransparency=0.4; label.TextXAlignment = Enum.TextXAlignment.Center; label.Text = targetPlayer.Name; label.Parent = holder
     return bb, label
-end
-
-local playerESPEnabled=false
--- uid -> {p, hl, line, bb, lbl}
-local playerESPData={}
-local lastPEspUpd = 0
-
-local function newHighlightPlayer(char)
-    local h = newHighlight(char); h.FillColor = Color3.new(1,0,0); return h
 end
 
 local function ensurePlayerESP(uid)
@@ -369,24 +445,26 @@ safeConnect(LP.CharacterAdded, function(c) task.wait(0.2); if ghostEnabled then 
 -- ===== THEME (UI) Noche/Día =====
 local theme = {
     night = {
-        mainBg   = Color3.fromRGB(20,20,22),
-        headerBg = Color3.fromRGB(36,36,40),
+        mainBg   = Color3.fromRGB(18,18,22),
+        headerBg = Color3.fromRGB(30,30,36),
         text     = Color3.fromRGB(235,235,245),
         muted    = Color3.fromRGB(170,170,180),
         switchOn = Color3.fromRGB(60,200,60),
-        switchOff= Color3.fromRGB(90,90,95),
+        switchOff= Color3.fromRGB(85,85,95),
         btnReset = Color3.fromRGB(70,110,255),
         btnOff   = Color3.fromRGB(90,90,95),
+        stroke   = Color3.fromRGB(70,70,80),
     },
     day = {
-        mainBg   = Color3.fromRGB(240,240,245),
-        headerBg = Color3.fromRGB(220,220,230),
+        mainBg   = Color3.fromRGB(245,245,250),
+        headerBg = Color3.fromRGB(228,228,238),
         text     = Color3.fromRGB(20,20,25),
         muted    = Color3.fromRGB(70,70,80),
         switchOn = Color3.fromRGB(60,170,250),
         switchOff= Color3.fromRGB(180,180,190),
         btnReset = Color3.fromRGB(255,120,80),
         btnOff   = Color3.fromRGB(180,180,190),
+        stroke   = Color3.fromRGB(180,180,190),
     }
 }
 local themeModeNight = true -- UI por defecto noche
@@ -442,44 +520,50 @@ local function disableGameNight()
     for k, v in pairs(_origLighting) do pcall(function() Lighting[k] = v end) end
 end
 
--- ===== GUI (layout limpio) =====
+-- ===== GUI PRO (gradiente, sombras, strokes, toggle con T) =====
 local gui = Instance.new("ScreenGui"); gui.Name="GUI_"..G.BRAINROT_ESP_NAME; gui.ResetOnSpawn=false; gui.Parent=playerGui
 
-local main = Instance.new("Frame"); main.Size=UDim2.new(0,280,0,500); main.Position=UDim2.new(1,-290,0,10); main.Active=true; main.Draggable=true; main.Parent=gui
-Instance.new("UICorner", main).CornerRadius = UDim.new(0,12)
+local main = Instance.new("Frame"); main.Size=UDim2.new(0,300,0,520); main.Position=UDim2.new(1,-310,0,12); main.Active=true; main.Draggable=true; main.Parent=gui
+Instance.new("UICorner", main).CornerRadius = UDim.new(0,14)
+local mainStroke = Instance.new("UIStroke"); mainStroke.Thickness=2; mainStroke.Color=theme.night.stroke; mainStroke.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; mainStroke.Parent=main
+local mainShadow = Instance.new("ImageLabel"); mainShadow.BackgroundTransparency=1; mainShadow.Image="rbxassetid://1316045217"; mainShadow.ScaleType=Enum.ScaleType.Slice; mainShadow.SliceCenter=Rect.new(10,10,118,118); mainShadow.ImageTransparency=0.6; mainShadow.Size=UDim2.new(1,36,1,36); mainShadow.Position=UDim2.new(0,-18,0,-18); mainShadow.ZIndex=0; mainShadow.Parent=main
 
-local header = Instance.new("Frame"); header.Size=UDim2.new(1,0,0,46); header.Parent=main; Instance.new("UICorner", header).CornerRadius=UDim.new(0,12)
+local header = Instance.new("Frame"); header.Size=UDim2.new(1,0,0,52); header.Parent=main; Instance.new("UICorner", header).CornerRadius=UDim.new(0,14)
+local grad = Instance.new("UIGradient"); grad.Rotation=0; grad.Color=ColorSequence.new{ ColorSequenceKeypoint.new(0, Color3.fromRGB(80,95,255)), ColorSequenceKeypoint.new(1, Color3.fromRGB(120,60,255)) }; grad.Parent=header
 
 local title = Instance.new("TextLabel")
-title.BackgroundTransparency=1; title.Size=UDim2.new(1,-76,1,0); title.Position=UDim2.new(0,12,0,0)
-title.Text="ESP LITE+ • "..G.BRAINROT_ESP_VERSION; title.Font=Enum.Font.GothamBold; title.TextScaled=true; title.Parent=header
+title.BackgroundTransparency=1; title.Size=UDim2.new(1,-96,1,0); title.Position=UDim2.new(0,16,0,0)
+title.Text="ESP LITE+ • "..G.BRAINROT_ESP_VERSION; title.Font=Enum.Font.GothamBold; title.TextScaled=true; title.TextColor3=Color3.fromRGB(255,255,255); title.Parent=header
 
 local minimize = Instance.new("TextButton")
-minimize.Size=UDim2.new(0,30,0,30); minimize.Position=UDim2.new(1,-36,0.5,-15); minimize.Text="–"
-minimize.Font=Enum.Font.GothamBold; minimize.TextScaled=true; minimize.Parent=header
+minimize.Size=UDim2.new(0,34,0,34); minimize.Position=UDim2.new(1,-42,0.5,-17); minimize.Text="–"
+minimize.Font=Enum.Font.GothamBold; minimize.TextScaled=true; minimize.TextColor3=Color3.fromRGB(255,255,255); minimize.BackgroundTransparency=0.15; minimize.Parent=header
 Instance.new("UICorner", minimize).CornerRadius = UDim.new(0,8)
 
-local body = Instance.new("Frame"); body.Size=UDim2.new(1,-20,1,-106); body.Position=UDim2.new(0,10,0,60); body.Parent=main
-local pad = Instance.new("UIPadding"); pad.PaddingTop=UDim.new(0,6); pad.PaddingBottom=UDim.new(0,6); pad.PaddingLeft=UDim.new(0,6); pad.PaddingRight=UDim.new(0,6); pad.Parent=body
-local list = Instance.new("UIListLayout"); list.SortOrder=Enum.SortOrder.LayoutOrder; list.Padding = UDim.new(0,8); list.Parent=body
+local body = Instance.new("Frame"); body.Size=UDim2.new(1,-22,1,-120); body.Position=UDim2.new(0,11,0,64); body.Parent=main
+local pad = Instance.new("UIPadding"); pad.PaddingTop=UDim.new(0,8); pad.PaddingBottom=UDim.new(0,8); pad.PaddingLeft=UDim.new(0,8); pad.PaddingRight=UDim.new(0,8); pad.Parent=body
+local list = Instance.new("UIListLayout"); list.SortOrder=Enum.SortOrder.LayoutOrder; list.Padding = UDim.new(0,10); list.Parent=body
 
 local status = Instance.new("TextLabel")
-status.BackgroundTransparency=1; status.Size=UDim2.new(1,-20,0,22); status.Position=UDim2.new(0,10,1,-26)
+status.BackgroundTransparency=1; status.Size=UDim2.new(1,-22,0,24); status.Position=UDim2.new(0,11,1,-30)
 status.Font=Enum.Font.Gotham; status.TextScaled=true; status.Parent=main
 
--- Switch helper
+-- Switch builder (estética pro)
 local function makeSwitch(labelText, defaultOn, tipText)
-    local row = Instance.new("Frame"); row.Size=UDim2.new(1,0,0, tipText and 62 or 44); row.LayoutOrder = 10; row.Parent=body
-    local l = Instance.new("TextLabel"); l.BackgroundTransparency=1; l.Position=UDim2.new(0,0,0,0); l.Size=UDim2.new(1,-84,0,24)
-    l.Font=Enum.Font.Gotham; l.TextScaled=true; l.TextXAlignment=Enum.TextXAlignment.Left; l.Text=labelText; l.Parent=row
+    local row = Instance.new("Frame"); row.Size=UDim2.new(1,0,0, tipText and 70 or 52); row.LayoutOrder = 10; row.Parent=body
+    local rowBg = Instance.new("Frame"); rowBg.Size=UDim2.fromScale(1,1); rowBg.BackgroundTransparency=0.05; rowBg.Parent=row
+    local rowCorner = Instance.new("UICorner"); rowCorner.CornerRadius=UDim.new(0,10); rowCorner.Parent=rowBg
+    local rowStroke = Instance.new("UIStroke"); rowStroke.Thickness=1.5; rowStroke.Color=Color3.fromRGB(70,70,80); rowStroke.Parent=rowBg
+    local l = Instance.new("TextLabel"); l.BackgroundTransparency=1; l.Position=UDim2.new(0,10,0,6); l.Size=UDim2.new(1,-100,0,26)
+    l.Font=Enum.Font.GothamSemibold; l.TextScaled=true; l.TextXAlignment=Enum.TextXAlignment.Left; l.Text=labelText; l.Parent=rowBg
     local tip
     if tipText then
-        tip = Instance.new("TextLabel"); tip.BackgroundTransparency=1; tip.Position=UDim2.new(0,0,0,26); tip.Size=UDim2.new(1,-84,0,18)
-        tip.Font=Enum.Font.Gotham; tip.TextScaled=false; tip.TextSize=12; tip.TextXAlignment=Enum.TextXAlignment.Left; tip.Text=tipText; tip.Parent=row
+        tip = Instance.new("TextLabel"); tip.BackgroundTransparency=1; tip.Position=UDim2.new(0,10,0,36); tip.Size=UDim2.new(1,-100,0,18)
+        tip.Font=Enum.Font.Gotham; tip.TextScaled=false; tip.TextSize=12; tip.TextXAlignment=Enum.TextXAlignment.Left; tip.Text=tipText; tip.TextTransparency=0.1; tip.Parent=rowBg
     end
-    local switch = Instance.new("Frame"); switch.Size=UDim2.new(0,54,0,26); switch.Position=UDim2.new(1,-60,0,9); switch.Parent=row
+    local switch = Instance.new("Frame"); switch.Size=UDim2.new(0,58,0,28); switch.Position=UDim2.new(1,-68,0.5,-14); switch.Parent=rowBg
     Instance.new("UICorner", switch).CornerRadius=UDim.new(1,0)
-    local knob = Instance.new("Frame"); knob.Size=UDim2.new(0,22,0,22); knob.Position=UDim2.new(0,2,0,2); knob.Parent=switch
+    local knob = Instance.new("Frame"); knob.Size=UDim2.new(0,24,0,24); knob.Position=UDim2.new(0,2,0,2); knob.Parent=switch
     Instance.new("UICorner", knob).CornerRadius=UDim.new(1,0)
     local btn = Instance.new("TextButton"); btn.BackgroundTransparency=1; btn.Size=UDim2.new(1,0,1,0); btn.Text=""; btn.Parent=switch
 
@@ -488,19 +572,20 @@ local function makeSwitch(labelText, defaultOn, tipText)
         state = on
         local t = themeModeNight and theme.night or theme.day
         TweenService:Create(switch, TweenInfo.new(0.16), {BackgroundColor3 = on and t.switchOn or t.switchOff}):Play()
-        TweenService:Create(knob,   TweenInfo.new(0.16), {Position = on and UDim2.new(1,-24,0,2) or UDim2.new(0,2,0,2)}):Play()
+        TweenService:Create(knob,   TweenInfo.new(0.16), {Position = on and UDim2.new(1,-26,0,2) or UDim2.new(0,2,0,2)}):Play()
     end
     setState(defaultOn)
-    return { row=row, label=l, tip=tip, switch=switch, knob=knob, btn=btn, get=function() return state end, set=setState }
+    return { row=row, label=l, tip=tip, switch=switch, knob=knob, btn=btn, get=function() return state end, set=setState, bg=rowBg, stroke=rowStroke }
 end
 
 -- Botón helper
 local function makeButton(text, color, layoutOrder)
     local b = Instance.new("TextButton")
-    b.Size=UDim2.new(1,0,0,40); b.LayoutOrder = layoutOrder or 100
+    b.Size=UDim2.new(1,0,0,44); b.LayoutOrder = layoutOrder or 100
     b.BackgroundColor3 = color; b.TextColor3 = Color3.new(1,1,1)
     b.TextScaled=true; b.Font=Enum.Font.GothamBold; b.Text=text; b.Parent=body
-    Instance.new("UICorner", b).CornerRadius=UDim.new(0,8)
+    Instance.new("UICorner", b).CornerRadius=UDim.new(0,10)
+    local st = Instance.new("UIStroke"); st.Thickness=1.8; st.Color=Color3.fromRGB(20,20,28); st.Parent=b
     return b
 end
 
@@ -522,11 +607,21 @@ local collapsed=false
 minimize.MouseButton1Click:Connect(function()
     collapsed = not collapsed
     if collapsed then
-        TweenService:Create(main, TweenInfo.new(0.22), {Size=UDim2.new(0,280,0,86)}):Play()
+        TweenService:Create(main, TweenInfo.new(0.22), {Size=UDim2.new(0,300,0,92)}):Play()
         body.Visible=false; status.Visible=false; minimize.Text="+"
     else
-        TweenService:Create(main, TweenInfo.new(0.22), {Size=UDim2.new(0,280,0,500)}):Play()
+        TweenService:Create(main, TweenInfo.new(0.22), {Size=UDim2.new(0,300,0,520)}):Play()
         task.wait(0.22); body.Visible=true; status.Visible=true; minimize.Text="–"
+    end
+end)
+
+-- Toggle general con tecla [T]
+local function setGuiVisible(v) main.Visible=v end
+setGuiVisible(true)
+safeConnect(UserInput.InputBegan, function(inp, gp)
+    if gp then return end
+    if inp.KeyCode == Enum.KeyCode.T then
+        setGuiVisible(not main.Visible)
     end
 end)
 
@@ -534,16 +629,19 @@ end)
 local function applyTheme()
     local t = themeModeNight and theme.night or theme.day
     main.BackgroundColor3   = t.mainBg
-    header.BackgroundColor3 = t.headerBg
+    mainStroke.Color        = t.stroke
     title.TextColor3        = t.text
-    minimize.TextColor3     = t.text
+    minimize.TextColor3     = Color3.fromRGB(255,255,255)
     status.TextColor3       = t.muted
+    header.BackgroundColor3 = t.headerBg -- queda cubierto por gradiente; mantiene base
     local sws = {swNight, swGameNight, swESP, swCont, swNotif, swPlayer, swXRay, swGhost}
     for _,s in ipairs(sws) do
         if s.label then s.label.TextColor3 = t.text end
         if s.tip   then s.tip.TextColor3   = t.muted end
+        if s.stroke then s.stroke.Color = t.stroke end
         s.set(s.get())
         s.knob.BackgroundColor3 = Color3.new(1,1,1)
+        s.bg.BackgroundColor3   = themeModeNight and Color3.fromRGB(22,22,28) or Color3.fromRGB(250,250,255)
     end
     btnReset.BackgroundColor3 = themeModeNight and theme.night.btnReset or theme.day.btnReset
     btnUnload.BackgroundColor3= themeModeNight and theme.night.btnOff   or theme.day.btnOff
@@ -571,7 +669,11 @@ swESP.btn.MouseButton1Click:Connect(function()
     espEnabled = not espEnabled
     swESP.set(espEnabled)
     if espEnabled then startScan(); toast("ESP activado (15s)")
-    else for inst,data in pairs(activeMarks) do safeDestroy(data.hl); activeMarks[inst]=nil end; toast("ESP desactivado") end
+    else
+        for inst,data in pairs(activeMarks) do safeDestroy(data.hl) activeMarks[inst]=nil end
+        for inst,s in pairs(specialBrainrotLines) do freeLine(s.line); specialBrainrotLines[inst]=nil end
+        toast("ESP desactivado")
+    end
 end)
 
 swCont.btn.MouseButton1Click:Connect(function()
@@ -605,8 +707,9 @@ end)
 -- Reset / Unload
 local function RESET_ESP()
     for inst,data in pairs(activeMarks) do safeDestroy(data.hl) activeMarks[inst]=nil end
+    for inst,s in pairs(specialBrainrotLines) do freeLine(s.line) specialBrainrotLines[inst]=nil end
     if espEnabled then startScan() end
-    toast("ESP reseteado")
+    toast("ESP reseteado", Color3.fromRGB(120,180,255))
 end
 local function UNLOAD()
     if xrayEnabled   then disableXRay() end
@@ -614,10 +717,11 @@ local function UNLOAD()
     if playerESPEnabled then clearPlayerESP() end
     if gameNightEnabled then disableGameNight() end
     for inst,data in pairs(activeMarks) do safeDestroy(data.hl) activeMarks[inst]=nil end
+    for inst,s in pairs(specialBrainrotLines) do freeLine(s.line) specialBrainrotLines[inst]=nil end
     disconnectAll()
     safeDestroy(gui)
     G.__BRAINROT_ESP_RUNNING = false
-    toast("ESP descargado")
+    toast("ESP descargado", Color3.fromRGB(180,90,90))
 end
 btnReset.MouseButton1Click:Connect(RESET_ESP)
 btnUnload.MouseButton1Click:Connect(UNLOAD)
@@ -666,6 +770,26 @@ safeConnect(RunService.Heartbeat, function()
             lastCont = time()
             qpush(workspace)
         end
+        -- ===== Actualización de líneas de brainrots especiales =====
+        local myHRP = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if myHRP then
+            local myPos = myHRP.Position
+            for inst, pack in pairs(specialBrainrotLines) do
+                local L = pack.line
+                if isValid(inst) and isValid(L) and activeMarks[inst] then
+                    local tpos = getWorldPos(inst)
+                    if tpos then
+                        local dir  = tpos - myPos
+                        local dist = dir.Magnitude
+                        L.Size   = Vector3.new(0.28, 0.28, math.max(dist, 0.5))
+                        L.CFrame = CFrame.lookAt(myPos + dir*0.5, tpos)
+                        L.Color  = pack.color
+                    end
+                else
+                    freeLine(L); specialBrainrotLines[inst] = nil
+                end
+            end
+        end
     end
 
     if playerESPEnabled then updatePlayerESPLines() end
@@ -674,5 +798,5 @@ safeConnect(RunService.Heartbeat, function()
     local cB, cP = 0, 0
     for _ in pairs(activeMarks) do cB+=1 end
     for _ in pairs(playerESPData) do cP+=1 end
-    status.Text = string.format("Brainrots activos: %d  |  Players ESP: %d", cB, cP)
+    status.Text = string.format("Brainrots activos: %d  |  Players ESP: %d  |  [T] togglear UI", cB, cP)
 end)
