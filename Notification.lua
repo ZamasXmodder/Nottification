@@ -55,8 +55,7 @@ local targetNames={
     "Chicleteira Bicicleteira","Spaghetti Tualetti","Esok Sekolah","Los Chicleteiras","67",
     "Los Combinasionas","Nuclearo Dinosauro","Las Sis","Los Hotspotsitos","Tralaledon",
     "Ketupat Kepat","Los Bros","La Supreme Combinasion","Ketchuru and Masturu",
-    "Garama and Madundung","Dragon Cannelloni","Celularcini Viciosini","Frankentteo"
-    ,"La Spooky Grande","Los Mobilis","Eviledon"
+    "Garama and Madundung","Dragon Cannelloni","Celularcini Viciosini","La Spooky Grande","Los Mobilis","Eviledon"
 }
 local targetSet={} for _,n in ipairs(targetNames) do targetSet[n]=true end
 
@@ -74,7 +73,6 @@ local specialDarkMap={
     ["La Supreme Combinasion"]={line=Color3.fromRGB(60,50,35), fill=Color3.fromRGB(48,40,28)},
     ["Garama and Madundung"] ={line=Color3.fromRGB(35,55,60), fill=Color3.fromRGB(28,46,50)},
     ["Dragon Cannelloni"]    ={line=Color3.fromRGB(60,35,35), fill=Color3.fromRGB(50,28,28)},
-    ["Frankentteo"]    ={line=Color3.fromRGB(60,35,35), fill=Color3.fromRGB(50,28,28)},
 }
 
 -- estado esp
