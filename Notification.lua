@@ -73,7 +73,7 @@ local XRAY_TRANSPARENCY = 0.8
 
 -- ===== Targets =====
 local targetNames = {
-    "La Secret Combinasion","Burguro And Fryuro","Los 67","Chillin Chili","Tang Tang Kelentang",
+    "La Secret Combinasion","Burguro And Fryuro","Los 67","Chillin Chili","Tang Tang Keletang",
     "Money Money Puggy","Los Primos","Los Tacoritas","La Grande Combinasion","Pot Hotspot",
     "Mariachi Corazoni","Secret Lucky Block","To to to Sahur","Strawberry Elephant",
     "Ketchuru and Musturu","La Extinct Grande","Tictac Sahur","Tacorita Bicicleta",
