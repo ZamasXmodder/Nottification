@@ -230,9 +230,53 @@ local function updateColors()
     end
 end
 
--- notifs
-local notifSound=Instance.new("Sound"); notifSound.SoundId="rbxassetid://77665577458181"; notifSound.Volume=0.7; notifSound.Parent=playerGui
-local function playNotificationSound() pcall(function() notifSound:Play() end) end
+-- =========================
+-- notifs (más fiable)  << PARCHE DE SONIDO >>
+-- =========================
+local SoundService = safeService("SoundService")
+local ContentProvider = safeService("ContentProvider")
+
+local NOTIF_ID = "rbxassetid://77665577458181"
+
+-- plantilla base (se clonará en cada ping para asegurar reinicio)
+local baseNotif = Instance.new("Sound")
+baseNotif.Name = "ESP_JoinPingTemplate"
+baseNotif.SoundId = NOTIF_ID
+baseNotif.Volume = 0.8
+baseNotif.PlaybackSpeed = 1
+baseNotif.RollOffMode = Enum.RollOffMode.InverseTapered
+baseNotif.EmitterSize = 5
+baseNotif.Looped = false
+-- fallback si no hay SoundService
+if not SoundService then baseNotif.Parent = playerGui end
+
+local lastPingAt = 0
+local function playNotificationSound()
+    local now = time()
+    -- micro-debounce para ráfagas de PlayerAdded simultáneos
+    if now - lastPingAt < 0.15 then return end
+    lastPingAt = now
+
+    if SoundService and SoundService.PlayLocalSound then
+        local s = baseNotif:Clone()
+        s.Name = "ESP_JoinPing"
+        s.Parent = SoundService
+        if ContentProvider and ContentProvider.PreloadAsync then
+            pcall(function() ContentProvider:PreloadAsync({ s }) end)
+        end
+        pcall(function() s:Play() end)
+        s.Ended:Once(function() pcall(function() s:Destroy() end) end)
+    else
+        -- Fallback: usar una sola instancia en GUI, forzando reinicio
+        if not isValid(baseNotif.Parent) then baseNotif.Parent = playerGui end
+        pcall(function()
+            baseNotif:Stop()
+            baseNotif.TimePosition = 0
+            baseNotif:Play()
+        end)
+    end
+end
+
 local function toast(msg,tColor)
     local gui=Instance.new("ScreenGui"); gui.Name="Toast_"..G.BRAINROT_ESP_NAME; gui.Parent=playerGui
     local f=Instance.new("Frame"); f.Size=UDim2.new(0,340,0,84); f.Position=UDim2.new(0.5,-170,1,-100); f.BackgroundColor3=Color3.fromRGB(24,24,28); f.BorderSizePixel=0; f.Parent=gui
@@ -244,6 +288,7 @@ local function toast(msg,tColor)
     TweenService:Create(f,TweenInfo.new(0.28,Enum.EasingStyle.Back),{Position=UDim2.new(0.5,-170,1,-100)}):Play()
     task.delay(3,function() local tw=TweenService:Create(f,TweenInfo.new(0.25),{Position=UDim2.new(0.5,-170,1,0)}); tw:Play(); tw.Completed:Once(function() safeDestroy(gui) end) end)
 end
+-- =========================
 
 -- player ESP
 local playerESPEnabled=false
