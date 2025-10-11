@@ -56,6 +56,7 @@ local targetNames={
     "Los Combinasionas","Nuclearo Dinosauro","Las Sis","Los Hotspotsitos","Tralaledon",
     "Ketupat Kepat","Los Bros","La Supreme Combinasion","Ketchuru and Masturu",
     "Garama and Madundung","Dragon Cannelloni","Celularcini Viciosini","Frankentteo"
+    ,"La Spooky Grande","Los Mobilis","Eviledon"
 }
 local targetSet={} for _,n in ipairs(targetNames) do targetSet[n]=true end
 
