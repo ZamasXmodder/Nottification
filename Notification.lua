@@ -1,19 +1,17 @@
 --// =========================
---//  ESP LITE+ SECURE v1.8.1
---//  Brainrots ESP core (igual) + líneas y highlight oscuros por nombre específico
---//  Player ESP PRO + Notifs + X-Ray + Ghost + Reset + Unload
---//  UI pro (gradiente, sombras, strokes) + Tema Noche/Día + tecla [T] + SCROLL vertical
+--//  ESP LITE+ SECURE v1.8.2 (release)
+--//  Brainrots ESP (líneas & highlights especiales) + Player ESP + Notifs
+--//  X-Ray + Ghost + Game Night + Sky predeterminado Roblox
+--//  GUI pro (gradiente, sombra, scroll, tecla [T])
 --//  Robust: anti-doble ejecución, pcall/safeConnect, BFS incremental, recreación segura
 --// =========================
 
--- ===== Seguridad / Anti doble ejecución =====
 local G = getgenv and getgenv() or _G
-G.BRAINROT_ESP_VERSION = "1.8.1-secure"
+G.BRAINROT_ESP_VERSION = "1.8.2-secure"
 G.BRAINROT_ESP_NAME    = "ESP_LITE_PLUS_SECURE"
 if G.__BRAINROT_ESP_RUNNING then return end
 G.__BRAINROT_ESP_RUNNING = true
 
--- ===== Esperar entorno listo =====
 local function waitForGameLoaded()
     if not game or not game.IsLoaded then return end
     if not game:IsLoaded() then repeat task.wait() until game:IsLoaded() end
@@ -38,22 +36,20 @@ end
 
 local LP = Players.LocalPlayer
 if not LP then repeat task.wait() until Players.LocalPlayer; LP = Players.LocalPlayer end
-
 local playerGui = LP:FindFirstChildOfClass("PlayerGui") or LP:WaitForChild("PlayerGui", 10)
 if not playerGui then G.__BRAINROT_ESP_RUNNING = false; return end
 
--- ===== Helpers =====
+-- Helpers
 local function isInstance(x) return typeof(x) == "Instance" end
 local function isValid(inst) return isInstance(inst) and inst.Parent ~= nil and inst:IsDescendantOf(game) end
 local function safeDestroy(x) if isInstance(x) and x.Destroy then pcall(function() x:Destroy() end) end end
 local function hsv(h) return Color3.fromHSV(h,1,1) end
 
--- Conexiones manejables
+-- Connections
 local CONNECTIONS = {}
 local function safeConnect(signal, fn)
     local c = signal:Connect(function(...)
-        local ok = pcall(fn, ...)
-        if not ok then end
+        local ok = pcall(fn, ...); if not ok then end
     end)
     table.insert(CONNECTIONS, c)
     return c
@@ -63,7 +59,7 @@ local function disconnectAll()
     table.clear(CONNECTIONS)
 end
 
--- ===== Parámetros =====
+-- Params
 local MARK_DURATION     = 15
 local RAINBOW_SPEED     = 0.35
 local SCAN_STEP_BUDGET  = 1200
@@ -71,9 +67,9 @@ local CONT_SCAN_PERIOD  = 2
 local PLAYER_LINE_FPS   = 30
 local XRAY_TRANSPARENCY = 0.8
 
--- ===== Targets =====
+-- Targets
 local targetNames = {
-    "La Secret Combinasion","Burguro And Fryuro","Los 67","Chillin Chili","Tang Tang Keletang",
+    "La Secret Combinasion","Burguro And Fryuro","Los 67","Chillin Chili","Tang Tang Kelentang",
     "Money Money Puggy","Los Primos","Los Tacoritas","La Grande Combinasion","Pot Hotspot",
     "Mariachi Corazoni","Secret Lucky Block","To to to Sahur","Strawberry Elephant",
     "Ketchuru and Musturu","La Extinct Grande","Tictac Sahur","Tacorita Bicicleta",
@@ -84,7 +80,7 @@ local targetNames = {
 }
 local targetSet = {} for _,n in ipairs(targetNames) do targetSet[n]=true end
 
--- ===== Colores oscuros por brainrot (línea + highlight) =====
+-- Special dark colors
 local specialDarkMap = {
     ["La Secret Combinasion"] = {line=Color3.fromRGB(40, 40, 55),  fill=Color3.fromRGB(35,35,48)},
     ["Burguro And Fryuro"]    = {line=Color3.fromRGB(60, 40, 40),  fill=Color3.fromRGB(52,32,32)},
@@ -100,12 +96,12 @@ local specialDarkMap = {
     ["Dragon Cannelloni"]     = {line=Color3.fromRGB(60, 35, 35),  fill=Color3.fromRGB(50,28,28)},
 }
 
--- ===== Estado ESP Brainrots =====
+-- ESP state
 local rainbowHue  = 0
-local everMarked  = setmetatable({}, {__mode="k"})   -- instancia ya marcada (no remarcar)
-local activeMarks = setmetatable({}, {__mode="k"})   -- inst -> {hl, createdAt, baseHue}
+local everMarked  = setmetatable({}, {__mode="k"})
+local activeMarks = setmetatable({}, {__mode="k"})
 
--- Raíces de brainrots (para X-Ray exclusión por ancestro)
+-- Brainrot roots
 local brainrotRoots = setmetatable({}, {__mode="k"})
 local function addBrainrotRoot(root) brainrotRoots[root] = true end
 local function hasBrainrotAncestor(obj)
@@ -135,7 +131,7 @@ local function newHighlight(target)
     return h
 end
 
--- ===== X-RAY (LTM) =====
+-- X-Ray
 local xrayEnabled = false
 local originalLTM = setmetatable({}, {__mode="k"})
 local function shouldIgnore(i) return i:IsDescendantOf(playerGui) or i:IsDescendantOf(Players) end
@@ -161,7 +157,6 @@ end
 local function enableXRay() xrayEnabled = true;  applyXRay(workspace) end
 local function disableXRay() xrayEnabled = false; restoreXRay(workspace) end
 
--- Des-XRay de brainrot detectado
 local function unXrayBrainrot(root)
     if not isValid(root) then return end
     local function restoreTree(n)
@@ -174,7 +169,7 @@ local function unXrayBrainrot(root)
     restoreTree(root)
 end
 
--- ===== Line pool (reutilizable para players y brainrots) =====
+-- Line pool (players + brainrots)
 local linePool = {}
 local function getLine()
     local l = table.remove(linePool)
@@ -192,14 +187,13 @@ local function getLine()
 end
 local function freeLine(l) if l then l.Parent=nil table.insert(linePool,l) end end
 
--- ===== Util para obtener posición de un objetivo =====
 local function getWorldPos(obj)
     if not isValid(obj) then return nil end
     if obj:IsA("BasePart") then return obj.Position end
     if obj:IsA("Model") then
         local pp = obj.PrimaryPart
         if pp and isValid(pp) then return pp.Position end
-        local ok, cf, size = pcall(obj.GetBoundingBox, obj)
+        local ok, cf = pcall(obj.GetBoundingBox, obj)
         if ok and cf then return cf.Position end
         for _,d in ipairs(obj:GetDescendants()) do
             if d:IsA("BasePart") then return d.Position end
@@ -208,12 +202,10 @@ local function getWorldPos(obj)
     return nil
 end
 
--- ===== Nuevas estructuras: líneas/colores para brainrots especiales =====
--- inst -> {line=Part, color=Color3}
+-- Special brainrot lines
 local specialBrainrotLines = setmetatable({}, {__mode="k"})
 
--- ===== Detección/Marcado Brainrots =====
--- *** RESPETA la función original y SOLO ADICIONA lo pedido ***
+-- Brainrot markOnce (mantiene lógica original + adición)
 local function markOnce(inst)
     if not isValid(inst) or everMarked[inst] then return end
     if not (inst:IsA("Model") or inst:IsA("BasePart")) then return end
@@ -223,12 +215,10 @@ local function markOnce(inst)
     addBrainrotRoot(inst)
     unXrayBrainrot(inst)
 
-    -- Highlight base (igual que antes)
     local hl = newHighlight(inst)
     hl.FillColor = hsv(rainbowHue)
     activeMarks[inst] = {hl=hl, createdAt=time(), baseHue=rainbowHue}
 
-    -- ==== ADICIÓN: línea + highlight OSCURO por nombre específico ====
     local spec = specialDarkMap[inst.Name]
     if spec then
         if isValid(hl) then
@@ -245,7 +235,7 @@ local function markOnce(inst)
     end
 end
 
--- ===== BFS incremental =====
+-- BFS incremental
 local scanQueue, qh, qt = {}, 1, 0
 local function qpush(x) qt+=1; scanQueue[qt]=x end
 local function qpop() if qh<=qt then local v=scanQueue[qh]; scanQueue[qh]=nil; qh+=1; return v end end
@@ -267,7 +257,6 @@ local function processScanStep()
 end
 local function startScan() qreset(); qpush(workspace) end
 
--- Nuevos objetos en el mapa
 safeConnect(workspace.DescendantAdded, function(i)
     if xrayEnabled and i:IsA("BasePart") and not shouldIgnore(i) and not hasBrainrotAncestor(i) and not isBrainrotNode(i) then
         setLTM(i, XRAY_TRANSPARENCY)
@@ -277,7 +266,6 @@ safeConnect(workspace.DescendantAdded, function(i)
     end
 end)
 
--- ===== Mantenimiento ESP =====
 local function cleanupExpired()
     local now = time()
     for inst, data in pairs(activeMarks) do
@@ -306,7 +294,7 @@ local function updateColors()
     end
 end
 
--- ===== Notificaciones =====
+-- Notifs
 local notifSound = Instance.new("Sound")
 notifSound.SoundId = "rbxassetid://77665577458181"
 notifSound.Volume  = 0.7
@@ -345,16 +333,14 @@ local function toast(msg, tColor)
     end)
 end
 
--- ===== Player ESP PRO =====
+-- Player ESP
 local playerESPEnabled=false
--- uid -> {p, hl, line, bb, lbl}
 local playerESPData={}
 local lastPEspUpd = 0
 
 local function newHighlightPlayer(char)
     local h = newHighlight(char); h.FillColor = Color3.new(1,0,0); return h
 end
-
 local function makeBillboard(targetPlayer)
     local bb = Instance.new("BillboardGui")
     bb.Name = "ESPPlayerBillboard"
@@ -368,7 +354,6 @@ local function makeBillboard(targetPlayer)
     local label = Instance.new("TextLabel"); label.Name="Text"; label.BackgroundTransparency=1; label.Size=UDim2.fromScale(1,1); label.TextScaled=true; label.Font=Enum.Font.GothamBold; label.TextColor3=Color3.new(1,1,1); label.TextStrokeTransparency=0.4; label.TextXAlignment = Enum.TextXAlignment.Center; label.Text = targetPlayer.Name; label.Parent = holder
     return bb, label
 end
-
 local function ensurePlayerESP(uid)
     local d = playerESPData[uid]
     if not d then return end
@@ -382,7 +367,6 @@ local function ensurePlayerESP(uid)
         d.bb, d.lbl = bb, lbl
     end
 end
-
 local function createPlayerESP(p)
     if p==LP or playerESPData[p.UserId] then return end
     local char=p.Character if not char then return end
@@ -392,12 +376,10 @@ local function createPlayerESP(p)
     local bb, lbl = makeBillboard(p); bb.Adornee = hrp; bb.Parent = workspace
     playerESPData[p.UserId] = {p=p, hl=hl, line=line, bb=bb, lbl=lbl}
 end
-
 local function clearPlayerESP()
     for _,d in pairs(playerESPData) do safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) end
     table.clear(playerESPData)
 end
-
 local function updatePlayerESPLines()
     local now = time(); if now - lastPEspUpd < 1/PLAYER_LINE_FPS then return end; lastPEspUpd = now
     local myHRP = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart"); if not myHRP then return end
@@ -424,7 +406,7 @@ local function updatePlayerESPLines()
     for _,uid in ipairs(toRemove) do local d = playerESPData[uid]; if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[uid]=nil end end
 end
 
--- ===== Ghost (70%) =====
+-- Ghost
 local ghostEnabled=false
 local function setCharTransp(char,t)
     for _,d in ipairs(char:GetDescendants()) do
@@ -436,46 +418,30 @@ local function ghostOn()  ghostEnabled=true;  if LP.Character then setCharTransp
 local function ghostOff() ghostEnabled=false; if LP.Character then setCharTransp(LP.Character,0.0) end end
 safeConnect(LP.CharacterAdded, function(c) task.wait(0.2); if ghostEnabled then setCharTransp(c,0.7) end end)
 
--- ===== THEME (UI) Noche/Día =====
+-- Theme UI
 local theme = {
-    night = {
-        mainBg   = Color3.fromRGB(18,18,22),
-        headerBg = Color3.fromRGB(30,30,36),
-        text     = Color3.fromRGB(235,235,245),
-        muted    = Color3.fromRGB(170,170,180),
-        switchOn = Color3.fromRGB(60,200,60),
-        switchOff= Color3.fromRGB(85,85,95),
-        btnReset = Color3.fromRGB(70,110,255),
-        btnOff   = Color3.fromRGB(90,90,95),
-        stroke   = Color3.fromRGB(70,70,80),
-    },
-    day = {
-        mainBg   = Color3.fromRGB(245,245,250),
-        headerBg = Color3.fromRGB(228,228,238),
-        text     = Color3.fromRGB(20,20,25),
-        muted    = Color3.fromRGB(70,70,80),
-        switchOn = Color3.fromRGB(60,170,250),
-        switchOff= Color3.fromRGB(180,180,190),
-        btnReset = Color3.fromRGB(255,120,80),
-        btnOff   = Color3.fromRGB(180,180,190),
-        stroke   = Color3.fromRGB(180,180,190),
-    }
+    night = { mainBg=Color3.fromRGB(18,18,22), headerBg=Color3.fromRGB(30,30,36), text=Color3.fromRGB(235,235,245),
+              muted=Color3.fromRGB(170,170,180), switchOn=Color3.fromRGB(60,200,60), switchOff=Color3.fromRGB(85,85,95),
+              btnReset=Color3.fromRGB(70,110,255), btnOff=Color3.fromRGB(90,90,95), stroke=Color3.fromRGB(70,70,80)},
+    day   = { mainBg=Color3.fromRGB(245,245,250), headerBg=Color3.fromRGB(228,228,238), text=Color3.fromRGB(20,20,25),
+              muted=Color3.fromRGB(70,70,80), switchOn=Color3.fromRGB(60,170,250), switchOff=Color3.fromRGB(180,180,190),
+              btnReset=Color3.fromRGB(255,120,80), btnOff=Color3.fromRGB(180,180,190), stroke=Color3.fromRGB(180,180,190)}
 }
-local themeModeNight = true -- UI por defecto noche
+local themeModeNight = true
 
--- ===== MODO NOCHE (JUEGO) =====
+-- Game Night
 local gameNightEnabled = false
 local nightConn
 local _origLighting = {}
 local function captureLighting()
-    _origLighting.ClockTime                 = Lighting.ClockTime
-    _origLighting.Brightness                = Lighting.Brightness
-    _origLighting.Ambient                   = Lighting.Ambient
-    _origLighting.OutdoorAmbient            = Lighting.OutdoorAmbient
-    _origLighting.EnvironmentDiffuseScale   = Lighting.EnvironmentDiffuseScale
-    _origLighting.EnvironmentSpecularScale  = Lighting.EnvironmentSpecularScale
-    _origLighting.FogStart                  = Lighting.FogStart
-    _origLighting.FogEnd                    = Lighting.FogEnd
+    _origLighting.ClockTime                = Lighting.ClockTime
+    _origLighting.Brightness               = Lighting.Brightness
+    _origLighting.Ambient                  = Lighting.Ambient
+    _origLighting.OutdoorAmbient           = Lighting.OutdoorAmbient
+    _origLighting.EnvironmentDiffuseScale  = Lighting.EnvironmentDiffuseScale
+    _origLighting.EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale
+    _origLighting.FogStart                 = Lighting.FogStart
+    _origLighting.FogEnd                   = Lighting.FogEnd
 end
 local function applyNightLook()
     Lighting.ClockTime = 22.5
@@ -501,8 +467,7 @@ end
 local function enableGameNight()
     if gameNightEnabled then return end
     gameNightEnabled = true
-    captureLighting()
-    applyNightLook()
+    captureLighting(); applyNightLook()
     nightConn = RunService.RenderStepped:Connect(function()
         if gameNightEnabled then Lighting.ClockTime = 22.5 end
     end)
@@ -514,27 +479,20 @@ local function disableGameNight()
     for k, v in pairs(_origLighting) do pcall(function() Lighting[k] = v end) end
 end
 
--- ===== GUI PRO (gradiente, sombras, strokes, toggle con T, con SCROLL) =====
+-- GUI + Scroll + [T]
 local gui = Instance.new("ScreenGui"); gui.Name="GUI_"..G.BRAINROT_ESP_NAME; gui.ResetOnSpawn=false; gui.Parent=playerGui
-
 local main = Instance.new("Frame"); main.Size=UDim2.new(0,300,0,520); main.Position=UDim2.new(1,-310,0,12); main.Active=true; main.Draggable=true; main.Parent=gui
 Instance.new("UICorner", main).CornerRadius = UDim.new(0,14)
 local mainStroke = Instance.new("UIStroke"); mainStroke.Thickness=2; mainStroke.Color=theme.night.stroke; mainStroke.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; mainStroke.Parent=main
 local mainShadow = Instance.new("ImageLabel"); mainShadow.BackgroundTransparency=1; mainShadow.Image="rbxassetid://1316045217"; mainShadow.ScaleType=Enum.ScaleType.Slice; mainShadow.SliceCenter=Rect.new(10,10,118,118); mainShadow.ImageTransparency=0.6; mainShadow.Size=UDim2.new(1,36,1,36); mainShadow.Position=UDim2.new(0,-18,0,-18); mainShadow.ZIndex=0; mainShadow.Parent=main
-
 local header = Instance.new("Frame"); header.Size=UDim2.new(1,0,0,52); header.Parent=main; Instance.new("UICorner", header).CornerRadius=UDim.new(0,14)
 local grad = Instance.new("UIGradient"); grad.Rotation=0; grad.Color=ColorSequence.new{ ColorSequenceKeypoint.new(0, Color3.fromRGB(80,95,255)), ColorSequenceKeypoint.new(1, Color3.fromRGB(120,60,255)) }; grad.Parent=header
-
-local title = Instance.new("TextLabel")
-title.BackgroundTransparency=1; title.Size=UDim2.new(1,-96,1,0); title.Position=UDim2.new(0,16,0,0)
+local title = Instance.new("TextLabel"); title.BackgroundTransparency=1; title.Size=UDim2.new(1,-96,1,0); title.Position=UDim2.new(0,16,0,0)
 title.Text="ESP LITE+ • "..G.BRAINROT_ESP_VERSION; title.Font=Enum.Font.GothamBold; title.TextScaled=true; title.TextColor3=Color3.fromRGB(255,255,255); title.Parent=header
-
-local minimize = Instance.new("TextButton")
-minimize.Size=UDim2.new(0,34,0,34); minimize.Position=UDim2.new(1,-42,0.5,-17); minimize.Text="–"
+local minimize = Instance.new("TextButton"); minimize.Size=UDim2.new(0,34,0,34); minimize.Position=UDim2.new(1,-42,0.5,-17); minimize.Text="–"
 minimize.Font=Enum.Font.GothamBold; minimize.TextScaled=true; minimize.TextColor3=Color3.fromRGB(255,255,255); minimize.BackgroundTransparency=0.15; minimize.Parent=header
 Instance.new("UICorner", minimize).CornerRadius = UDim.new(0,8)
 
--- Scrolling body (ruedita + swipe)
 local body = Instance.new("ScrollingFrame")
 body.Size      = UDim2.new(1,-22,1,-120)
 body.Position  = UDim2.new(0,11,0,64)
@@ -548,22 +506,10 @@ body.ScrollBarThickness = 6
 body.ScrollBarImageTransparency = 0.2
 body.ScrollBarImageColor3 = Color3.fromRGB(120,120,140)
 
-local pad = Instance.new("UIPadding")
-pad.PaddingTop    = UDim.new(0,8)
-pad.PaddingBottom = UDim.new(0,8)
-pad.PaddingLeft   = UDim.new(0,8)
-pad.PaddingRight  = UDim.new(0,8)
-pad.Parent        = body
-
-local list = Instance.new("UIListLayout")
-list.SortOrder = Enum.SortOrder.LayoutOrder
-list.Padding   = UDim.new(0,10)
-list.Parent    = body
-
+local pad = Instance.new("UIPadding"); pad.PaddingTop=UDim.new(0,8); pad.PaddingBottom=UDim.new(0,8); pad.PaddingLeft=UDim.new(0,8); pad.PaddingRight=UDim.new(0,8); pad.Parent=body
+local list = Instance.new("UIListLayout"); list.SortOrder=Enum.SortOrder.LayoutOrder; list.Padding = UDim.new(0,10); list.Parent=body
 if not hasAuto then
-    local function updateCanvas()
-        body.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 16)
-    end
+    local function updateCanvas() body.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 16) end
     list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
     task.defer(updateCanvas)
 end
@@ -572,7 +518,7 @@ local status = Instance.new("TextLabel")
 status.BackgroundTransparency=1; status.Size=UDim2.new(1,-22,0,24); status.Position=UDim2.new(0,11,1,-30)
 status.Font=Enum.Font.Gotham; status.TextScaled=true; status.Parent=main
 
--- Switch builder (estética pro)
+-- Switch builder
 local function makeSwitch(labelText, defaultOn, tipText)
     local row = Instance.new("Frame"); row.Size=UDim2.new(1,0,0, tipText and 70 or 52); row.LayoutOrder = 10; row.Parent=body
     local rowBg = Instance.new("Frame"); rowBg.Size=UDim2.fromScale(1,1); rowBg.BackgroundTransparency=0.05; rowBg.Parent=row
@@ -602,7 +548,6 @@ local function makeSwitch(labelText, defaultOn, tipText)
     return { row=row, label=l, tip=tip, switch=switch, knob=knob, btn=btn, get=function() return state end, set=setState, bg=rowBg, stroke=rowStroke }
 end
 
--- Botón helper
 local function makeButton(text, color, layoutOrder)
     local b = Instance.new("TextButton")
     b.Size=UDim2.new(1,0,0,44); b.LayoutOrder = layoutOrder or 100
@@ -613,15 +558,16 @@ local function makeButton(text, color, layoutOrder)
     return b
 end
 
--- Switches (UI theme + juego noche + características)
-local swNight     = makeSwitch("Tema UI: Noche", true, "Tema oscuro de alto contraste (solo interfaz)")
-local swGameNight = makeSwitch("Modo Noche (Juego)", false, "Fuerza la noche en el mundo (solo cliente)")
-local swESP       = makeSwitch("ESP Brainrots", false, "Marca brainrots listados por 15s (sin límite)")
-local swCont      = makeSwitch("Búsqueda continua", true, "Refuerza el escaneo (bajo costo)")
+-- Switches
+local swNight     = makeSwitch("Tema UI: Noche", true, "Tema oscuro (solo interfaz)")
+local swGameNight = makeSwitch("Modo Noche (Juego)", false, "Fuerza noche en el mundo (cliente)")
+local swESP       = makeSwitch("ESP Brainrots", false, "Marca brainrots 15s (sin límite)")
+local swCont      = makeSwitch("Búsqueda continua", true, "Refuerza el escaneo")
 local swNotif     = makeSwitch("Notificaciones", true, "Alerta al entrar jugadores")
 local swPlayer    = makeSwitch("ESP de jugadores", false, "Línea + nombre + distancia + highlight")
-local swXRay      = makeSwitch("X-RAY del mapa (80%)", false, "Oculta mapa sin afectar brainrots")
-local swGhost     = makeSwitch("Espíritu (Yo 70%)", false, "Tu personaje más transparente")
+local swXRay      = makeSwitch("X-RAY del mapa (80%)", false, "Oculta mapa sin brainrots")
+local swGhost     = makeSwitch("Espíritu (Yo 70%)", false, "Transparencia personaje")
+local swSky       = makeSwitch("Sky predeterminado (Roblox)", false, "Reemplaza skies por el default azul")
 
 local btnReset  = makeButton("RESET ESP", Color3.fromRGB(70,110,255), 200)
 local btnUnload = makeButton("UNLOAD",    Color3.fromRGB(90,90,95),  201)
@@ -639,14 +585,12 @@ minimize.MouseButton1Click:Connect(function()
     end
 end)
 
--- Toggle general con tecla [T]
+-- [T] toggle
 local function setGuiVisible(v) main.Visible=v end
 setGuiVisible(true)
 safeConnect(UserInput.InputBegan, function(inp, gp)
     if gp then return end
-    if inp.KeyCode == Enum.KeyCode.T then
-        setGuiVisible(not main.Visible)
-    end
+    if inp.KeyCode == Enum.KeyCode.T then setGuiVisible(not main.Visible) end
 end)
 
 -- Theme apply
@@ -658,7 +602,7 @@ local function applyTheme()
     minimize.TextColor3     = Color3.fromRGB(255,255,255)
     status.TextColor3       = t.muted
     header.BackgroundColor3 = t.headerBg
-    local sws = {swNight, swGameNight, swESP, swCont, swNotif, swPlayer, swXRay, swGhost}
+    local sws = {swNight, swGameNight, swESP, swCont, swNotif, swPlayer, swXRay, swGhost, swSky}
     for _,s in ipairs(sws) do
         if s.label then s.label.TextColor3 = t.text end
         if s.tip   then s.tip.TextColor3   = t.muted end
@@ -672,12 +616,12 @@ local function applyTheme()
 end
 applyTheme()
 
--- ===== Estado toggles =====
+-- Toggles state
 local espEnabled      = false
 local contEnabled     = true
 local notifEnabled    = true
 
--- ===== Lógica switches =====
+-- Switch logic
 swNight.btn.MouseButton1Click:Connect(function()
     themeModeNight = not themeModeNight
     applyTheme()
@@ -728,7 +672,13 @@ swGhost.btn.MouseButton1Click:Connect(function()
     swGhost.set(ghostEnabled)
 end)
 
--- ===== Reset / Unload =====
+swSky.btn.MouseButton1Click:Connect(function()
+    defaultSkyEnabled = not defaultSkyEnabled
+    swSky.set(defaultSkyEnabled)
+    if defaultSkyEnabled then applyDefaultSky() else restoreOriginalSky() end
+end)
+
+-- Reset / Unload
 local function RESET_ESP()
     for inst,data in pairs(activeMarks) do safeDestroy(data.hl) activeMarks[inst]=nil end
     for inst,s in pairs(specialBrainrotLines) do freeLine(s.line) specialBrainrotLines[inst]=nil end
@@ -751,7 +701,7 @@ btnReset.MouseButton1Click:Connect(RESET_ESP)
 btnUnload.MouseButton1Click:Connect(UNLOAD)
 G.BRAINROT_UNLOAD = UNLOAD
 
--- ===== Eventos jugadores =====
+-- Player events
 safeConnect(Players.PlayerAdded, function(p)
     if notifEnabled then playNotificationSound(); toast("🚨 "..p.Name.." se unió") end
     if playerESPEnabled then task.wait(0.25); createPlayerESP(p) end
@@ -780,7 +730,7 @@ for _,p in ipairs(Players:GetPlayers()) do
     end
 end
 
--- ===== Loop =====
+-- Loop
 local lastCont = 0
 safeConnect(RunService.Heartbeat, function()
     rainbowHue = (rainbowHue + 0.02) % 1
@@ -794,7 +744,7 @@ safeConnect(RunService.Heartbeat, function()
             lastCont = time()
             qpush(workspace)
         end
-        -- Actualización de líneas de brainrots especiales
+        -- special brainrot lines update
         local myHRP = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
         if myHRP then
             local myPos = myHRP.Position
