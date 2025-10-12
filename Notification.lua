@@ -1,10 +1,10 @@
 --// =========================
 --//  ESP LITE+ SECURE v1.8.3
---//  Brainrots ESP (líneas & highlights especiales) + Player ESP + Notifs
+--//  Brainrots ESP + Player ESP + Notifs
 --//  X-Ray + Ghost + Game Night + Sky predeterminado Roblox (FORZADO)
 --//  GUI pro (gradiente, sombra, scroll, tecla [T])
---//  + Gráficos suaves (Potato) para menos lag
---//  + Specials: pulso oscuro <-> rojo (highlight y línea)
+--//  Potato: optimiza MAPA (mundo), no la GUI
+--//  Specials: pulso oscuro <-> rojo (highlight y línea)
 --// =========================
 
 -- anti doble ejecución
@@ -25,7 +25,8 @@ waitForGameLoaded()
 local function safeService(name) local ok,svc=pcall(game.GetService,game,name) return ok and svc or nil end
 local Players=safeService("Players"); local RunService=safeService("RunService")
 local TweenService=safeService("TweenService"); local Lighting=safeService("Lighting")
-local UserInput=safeService("UserInputService")
+local UserInput=safeService("UserInputService"); local SoundService=safeService("SoundService")
+local ContentProvider=safeService("ContentProvider")
 if not (Players and RunService and TweenService and Lighting and UserInput) then G.__BRAINROT_ESP_RUNNING=false; return end
 
 local LP=Players.LocalPlayer
@@ -44,7 +45,7 @@ local CONNECTIONS={}
 local function safeConnect(signal,fn) local c=signal:Connect(function(...) pcall(fn,...) end) table.insert(CONNECTIONS,c) return c end
 local function disconnectAll() for _,c in ipairs(CONNECTIONS) do pcall(function() c:Disconnect() end) end table.clear(CONNECTIONS) end
 
--- parámetros (valores normales por defecto)
+-- parámetros
 local MARK_DURATION=15
 local RAINBOW_SPEED=0.35
 local SCAN_STEP_BUDGET=1200
@@ -52,13 +53,10 @@ local CONT_SCAN_PERIOD=2
 local PLAYER_LINE_FPS=30
 local XRAY_TRANSPARENCY=0.8
 
--- ===== Specials pulse config =====
-local RED_STRONG = Color3.fromRGB(220,40,40)         -- rojo fuerte
-local SPECIAL_PULSE_SPEED = 1.2                      -- velocidad de pulso (ajustable por Potato)
-local function pulseAlpha(t, speed)
-    -- seno suave 0->1
-    return 0.5 + 0.5 * math.sin(t * speed)
-end
+-- Specials: pulso oscuro<->rojo
+local RED_STRONG = Color3.fromRGB(220,40,40)
+local SPECIAL_PULSE_SPEED = 1.2
+local function pulseAlpha(t, speed) return 0.5 + 0.5 * math.sin(t * speed) end
 
 -- targets
 local targetNames={
@@ -170,7 +168,7 @@ end
 -- estructuras especiales
 local specialBrainrotLines=setmetatable({}, {__mode="k"}) -- {inst={line,color,baseFill,baseLine}}
 
--- markOnce (incluye setup del pulso en especiales)
+-- markOnce
 local function markOnce(inst)
     if not isValid(inst) or everMarked[inst] then return end
     if not (inst:IsA("Model") or inst:IsA("BasePart")) then return end
@@ -181,11 +179,9 @@ local function markOnce(inst)
     unXrayBrainrot(inst)
 
     local hl=newHighlight(inst)
-    -- base para comunes
     hl.FillColor=hsv(rainbowHue)
     activeMarks[inst]={hl=hl, createdAt=time(), baseHue=rainbowHue}
 
-    -- especiales: más oscuro y outline muy oscuro
     local spec=specialDarkMap[inst.Name]
     if spec then
         if isValid(hl) then
@@ -224,6 +220,8 @@ local function startScan() qreset(); qpush(workspace) end
 safeConnect(workspace.DescendantAdded,function(i)
     if xrayEnabled and i:IsA("BasePart") and not shouldIgnore(i) and not hasBrainrotAncestor(i) and not isBrainrotNode(i) then setLTM(i,XRAY_TRANSPARENCY) end
     if isBrainrotNode(i) and targetSet[i.Name] then markOnce(i) end
+    -- si Potato está ON, aplicamos optimización a nuevos nodos del mapa
+    if potatoOn then enqueuePotatoCandidate(i) end
 end)
 
 -- mantenimiento ESP
@@ -240,7 +238,7 @@ local function cleanupExpired()
     end
 end
 
--- *** FIX Luau (sin goto): pulso oscuro<->rojo en especiales, arcoíris en el resto
+-- colores/pulsos
 local function updateColors()
     local tNow = time()
     for inst, data in pairs(activeMarks) do
@@ -248,8 +246,8 @@ local function updateColors()
         if isValid(hl) then
             local spec = specialDarkMap[inst.Name]
             if spec then
-                local s = 0.5 + 0.5 * math.sin(tNow * SPECIAL_PULSE_SPEED) -- 0..1
-                s = s * 0.7  -- sesgo a oscuro
+                local s = 0.5 + 0.5 * math.sin(tNow * SPECIAL_PULSE_SPEED)
+                s = s * 0.7
                 local fill = spec.fill:Lerp(RED_STRONG, s)
                 hl.FillColor = fill
                 hl.OutlineTransparency = 0.05
@@ -263,12 +261,9 @@ local function updateColors()
 end
 
 -- =========================
--- notifs (más fiable)  << PARCHE DE SONIDO >>
+-- notifs (parche de sonido confiable)
 -- =========================
-local SoundService = safeService("SoundService")
-local ContentProvider = safeService("ContentProvider")
 local NOTIF_ID = "rbxassetid://77665577458181"
-
 local baseNotif = Instance.new("Sound")
 baseNotif.Name = "ESP_JoinPingTemplate"
 baseNotif.SoundId = NOTIF_ID
@@ -284,23 +279,16 @@ local function playNotificationSound()
     local now = time()
     if now - lastPingAt < 0.15 then return end
     lastPingAt = now
-
     if SoundService and SoundService.PlayLocalSound then
         local s = baseNotif:Clone()
         s.Name = "ESP_JoinPing"
         s.Parent = SoundService
-        if ContentProvider and ContentProvider.PreloadAsync then
-            pcall(function() ContentProvider:PreloadAsync({ s }) end)
-        end
+        if ContentProvider and ContentProvider.PreloadAsync then pcall(function() ContentProvider:PreloadAsync({ s }) end) end
         pcall(function() s:Play() end)
         s.Ended:Once(function() pcall(function() s:Destroy() end) end)
     else
         if not isValid(baseNotif.Parent) then baseNotif.Parent = playerGui end
-        pcall(function()
-            baseNotif:Stop()
-            baseNotif.TimePosition = 0
-            baseNotif:Play()
-        end)
+        pcall(function() baseNotif:Stop(); baseNotif.TimePosition = 0; baseNotif:Play() end)
     end
 end
 
@@ -315,7 +303,6 @@ local function toast(msg,tColor)
     TweenService:Create(f,TweenInfo.new(0.28,Enum.EasingStyle.Back),{Position=UDim2.new(0.5,-170,1,-100)}):Play()
     task.delay(3,function() local tw=TweenService:Create(f,TweenInfo.new(0.25),{Position=UDim2.new(0.5,-170,1,0)}); tw:Play(); tw.Completed:Once(function() safeDestroy(gui) end) end)
 end
--- =========================
 
 -- player ESP
 local playerESPEnabled=false
@@ -451,7 +438,7 @@ local swPlayer    = makeSwitch("ESP de jugadores", false, "Línea + nombre + dis
 local swXRay      = makeSwitch("X-RAY del mapa (80%)", false, "Oculta mapa sin brainrots")
 local swGhost     = makeSwitch("Espíritu (Yo 70%)", false, "Transparencia personaje")
 local swSky       = makeSwitch("Sky predeterminado (Roblox)", false, "Forzar sky azul y bloquear reemplazos")
-local swPotato    = makeSwitch("Gráficos suaves (Potato)", false, "Optimiza efectos y escaneo para bajo rendimiento")
+local swPotato    = makeSwitch("Gráficos suaves (Potato)", false, "Optimiza el MAPA para FPS")
 
 local btnReset=makeButton("RESET ESP", Color3.fromRGB(70,110,255), 200)
 local btnUnload=makeButton("UNLOAD", Color3.fromRGB(90,90,95), 201)
@@ -478,8 +465,7 @@ local function applyTheme()
         if s.label then s.label.TextColor3=t.text end
         if s.tip then s.tip.TextColor3=t.muted end
         if s.stroke then s.stroke.Color=t.stroke end
-        s.set(s.get())
-        s.knob.BackgroundColor3=Color3.new(1,1,1)
+        s.set(s.get()); s.knob.BackgroundColor3=Color3.new(1,1,1)
         s.bg.BackgroundColor3=themeModeNight and Color3.fromRGB(22,22,28) or Color3.fromRGB(250,250,255)
     end
     btnReset.BackgroundColor3=themeModeNight and theme.night.btnReset or theme.day.btnReset
@@ -487,14 +473,11 @@ local function applyTheme()
 end
 applyTheme()
 
--- estado toggles
-local espEnabled=false; local contEnabled=true; local notifEnabled=true
-
 -- ===== Sky predeterminado (FORZADO) =====
 local defaultSkyEnabled=false
-local removedSkies={}   -- { [inst]=parent }
-local skyGuardianConn   -- RenderStepped ref
-local skyAddedConn      -- Lighting.DescendantAdded ref
+local removedSkies={}
+local skyGuardianConn
+local skyAddedConn
 
 local function createDefaultSky()
     local sky=Lighting:FindFirstChild("ESP_DefaultSky")
@@ -511,29 +494,15 @@ local function createDefaultSky()
     end
     return sky
 end
-
-local function stashAndRemoveSky(inst)
-    if removedSkies[inst]==nil then removedSkies[inst]=inst.Parent end
-    inst.Parent=nil
-end
-
-local function removeAllSkiesExceptDefault()
-    for _,d in ipairs(Lighting:GetDescendants()) do
-        if d:IsA("Sky") and d.Name~="ESP_DefaultSky" then stashAndRemoveSky(d) end
-    end
-end
-
+local function stashAndRemoveSky(inst) if removedSkies[inst]==nil then removedSkies[inst]=inst.Parent end; inst.Parent=nil end
+local function removeAllSkiesExceptDefault() for _,d in ipairs(Lighting:GetDescendants()) do if d:IsA("Sky") and d.Name~="ESP_DefaultSky" then stashAndRemoveSky(d) end end end
 local function applyDefaultSkyForced()
-    removeAllSkiesExceptDefault()
-    createDefaultSky()
+    removeAllSkiesExceptDefault(); createDefaultSky()
     if not skyGuardianConn then
         skyGuardianConn = RunService.RenderStepped:Connect(function()
             if not defaultSkyEnabled then return end
-            local hasDefault = Lighting:FindFirstChild("ESP_DefaultSky")
-            if not hasDefault then createDefaultSky() end
-            for _,d in ipairs(Lighting:GetChildren()) do
-                if d:IsA("Sky") and d.Name~="ESP_DefaultSky" then stashAndRemoveSky(d) end
-            end
+            if not Lighting:FindFirstChild("ESP_DefaultSky") then createDefaultSky() end
+            for _,d in ipairs(Lighting:GetChildren()) do if d:IsA("Sky") and d.Name~="ESP_DefaultSky" then stashAndRemoveSky(d) end end
         end)
     end
     if not skyAddedConn then
@@ -543,7 +512,6 @@ local function applyDefaultSkyForced()
         end)
     end
 end
-
 local function restoreOriginalSkies()
     if skyGuardianConn then pcall(function() skyGuardianConn:Disconnect() end); skyGuardianConn=nil end
     if skyAddedConn then pcall(function() skyAddedConn:Disconnect() end); skyAddedConn=nil end
@@ -552,68 +520,186 @@ local function restoreOriginalSkies()
     table.clear(removedSkies)
 end
 
--- ====== GRÁFICOS SUAVES (POTATO) ======
+-- ====== GRÁFICOS SUAVES (POTATO) — MAPA ======
 local potatoOn=false
-local NORMALS = {
-    MARK_DURATION=15, RAINBOW_SPEED=0.35, SCAN_STEP_BUDGET=1200,
-    CONT_SCAN_PERIOD=2, PLAYER_LINE_FPS=30, BILLBOARD_MAXDIST=3000, PULSE=SPECIAL_PULSE_SPEED
-}
-local POTATO = {
-    MARK_DURATION=9,  RAINBOW_SPEED=0.18, SCAN_STEP_BUDGET=700,
-    CONT_SCAN_PERIOD=3.5, PLAYER_LINE_FPS=18, BILLBOARD_MAXDIST=1500, PULSE=0.7
+
+-- Presupuestos de procesado para no lag
+local POTATO_SCAN_BUDGET = 1000  -- nodos por Heartbeat
+
+-- Copias de estado para restaurar
+local P_ORIG = { -- claves por instancia: {prop = valorOriginal}
+    CastShadow = setmetatable({}, {__mode="k"}),
+    RenderFidelity = setmetatable({}, {__mode="k"}),
+    LightEnabled = setmetatable({}, {__mode="k"}),
+    ParticleEnabled = setmetatable({}, {__mode="k"}),
+    ParticleRate = setmetatable({}, {__mode="k"}),
+    TrailEnabled = setmetatable({}, {__mode="k"}),
+    BeamEnabled = setmetatable({}, {__mode="k"}),
+    DecalTransparency = setmetatable({}, {__mode="k"}),
+    TextureTransparency = setmetatable({}, {__mode="k"}),
 }
 
-local function setLinesMaterial(plastic)
-    for _,d in pairs(playerESPData) do
-        if d.line and isValid(d.line) then
-            d.line.Material = plastic and Enum.Material.Plastic or Enum.Material.ForceField
-            d.line.Transparency = plastic and 0.2 or 0.1
-        end
-    end
-    for _,pack in pairs(specialBrainrotLines) do
-        if pack.line and isValid(pack.line) then
-            pack.line.Material = plastic and Enum.Material.Plastic or Enum.Material.Neon
-            pack.line.Transparency = plastic and 0.2 or 0.14
-        end
+-- cola de candidatos para aplicar Potato de forma incremental
+local POTATO_QUEUE, pqh, pqt = {},1,0
+local function pq_push(x) pqt+=1; POTATO_QUEUE[pqt]=x end
+local function pq_pop() if pqh<=pqt then local v=POTATO_QUEUE[pqh]; POTATO_QUEUE[pqh]=nil; pqh+=1; return v end end
+local function pq_reset() for i=pqh,pqt do POTATO_QUEUE[i]=nil end pqh,pqt=1,0 end
+
+-- detectar si un nodo es “brainrot” o está dentro de uno (no tocar)
+local function inBrainrot(n) return hasBrainrotAncestor(n) or (isBrainrotNode(n) and targetSet[n.Name]) end
+
+-- aplicar optimización a un solo objeto
+local function potatoApplyOne(obj)
+    if not isValid(obj) then return end
+    if inBrainrot(obj) then return end  -- no degradar nuestros objetivos
+
+    if obj:IsA("MeshPart") then
+        if P_ORIG.RenderFidelity[obj]==nil then P_ORIG.RenderFidelity[obj]=obj.RenderFidelity end
+        obj.RenderFidelity = Enum.RenderFidelity.Performance
+        if P_ORIG.CastShadow[obj]==nil then P_ORIG.CastShadow[obj]=obj.CastShadow end
+        obj.CastShadow=false
+    elseif obj:IsA("BasePart") then
+        if P_ORIG.CastShadow[obj]==nil then P_ORIG.CastShadow[obj]=obj.CastShadow end
+        obj.CastShadow=false
+    elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+        if P_ORIG.LightEnabled[obj]==nil then P_ORIG.LightEnabled[obj]=obj.Enabled end
+        obj.Enabled=false
+    elseif obj:IsA("ParticleEmitter") then
+        if P_ORIG.ParticleEnabled[obj]==nil then P_ORIG.ParticleEnabled[obj]=obj.Enabled end
+        if P_ORIG.ParticleRate[obj]==nil then P_ORIG.ParticleRate[obj]=obj.Rate end
+        obj.Enabled=false; obj.Rate=0
+    elseif obj:IsA("Trail") then
+        if P_ORIG.TrailEnabled[obj]==nil then P_ORIG.TrailEnabled[obj]=obj.Enabled end
+        obj.Enabled=false
+    elseif obj:IsA("Beam") then
+        if P_ORIG.BeamEnabled[obj]==nil then P_ORIG.BeamEnabled[obj]=obj.Enabled end
+        obj.Enabled=false
+    elseif obj:IsA("Decal") then
+        if P_ORIG.DecalTransparency[obj]==nil then P_ORIG.DecalTransparency[obj]=obj.Transparency end
+        obj.Transparency = math.clamp((obj.Transparency or 0)+0.35, 0, 1)
+    elseif obj.ClassName=="Texture" then
+        if P_ORIG.TextureTransparency[obj]==nil then P_ORIG.TextureTransparency[obj]=obj.Transparency end
+        obj.Transparency = math.clamp((obj.Transparency or 0)+0.35, 0, 1)
     end
 end
 
-local function setBillboardsMaxDistance(dist)
-    for _,d in pairs(playerESPData) do
-        if d.bb and isValid(d.bb) then d.bb.MaxDistance = dist end
+-- recorrer Lighting y desactivar post-procesos costosos (con restore)
+local L_ORIG = { Effects = {}, Atmospheres = {}, Props = {} }
+
+local function potatoLightingOn()
+    -- guardar y desactivar efectos
+    for _,d in ipairs(Lighting:GetDescendants()) do
+        if d:IsA("BloomEffect") or d:IsA("SunRaysEffect") or d:IsA("DepthOfFieldEffect") or d:IsA("BlurEffect") or d:IsA("ColorCorrectionEffect") then
+            table.insert(L_ORIG.Effects, {inst=d, enabled=d.Enabled})
+            d.Enabled=false
+        elseif d:IsA("Atmosphere") then
+            table.insert(L_ORIG.Atmospheres, d)
+        end
+    end
+    -- quitar Atmospheres (guardadas arriba)
+    for _,atm in ipairs(L_ORIG.Atmospheres) do pcall(function() atm.Parent=nil end) end
+    -- props Lighting menos costosos
+    L_ORIG.Props.ClockTime = Lighting.ClockTime
+    L_ORIG.Props.Brightness = Lighting.Brightness
+    L_ORIG.Props.EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale
+    L_ORIG.Props.EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale
+    L_ORIG.Props.ShadowSoftness = Lighting.ShadowSoftness
+    Lighting.Brightness = math.min(2, Lighting.Brightness)
+    Lighting.EnvironmentSpecularScale = 0
+    Lighting.EnvironmentDiffuseScale = 0.2
+    Lighting.ShadowSoftness = 0
+    -- Terrain agua
+    local Terrain = workspace and workspace:FindFirstChildOfClass("Terrain")
+    if Terrain then
+        L_ORIG.Props.WaterWaveSize = Terrain.WaterWaveSize
+        L_ORIG.Props.WaterWaveSpeed = Terrain.WaterWaveSpeed
+        L_ORIG.Props.WaterReflectance = Terrain.WaterReflectance
+        L_ORIG.Props.WaterTransparency = Terrain.WaterTransparency
+        Terrain.WaterWaveSize = 0
+        Terrain.WaterWaveSpeed = 0
+        Terrain.WaterReflectance = 0
+        Terrain.WaterTransparency = 0.5
     end
 end
 
+local function potatoLightingOff()
+    for _,e in ipairs(L_ORIG.Effects) do if isValid(e.inst) then e.inst.Enabled=e.enabled end end
+    for _,atm in ipairs(L_ORIG.Atmospheres) do if atm then pcall(function() atm.Parent=Lighting end) end end
+    if L_ORIG.Props then
+        pcall(function()
+            if L_ORIG.Props.ClockTime then Lighting.ClockTime=L_ORIG.Props.ClockTime end
+            if L_ORIG.Props.Brightness then Lighting.Brightness=L_ORIG.Props.Brightness end
+            if L_ORIG.Props.EnvironmentSpecularScale then Lighting.EnvironmentSpecularScale=L_ORIG.Props.EnvironmentSpecularScale end
+            if L_ORIG.Props.EnvironmentDiffuseScale then Lighting.EnvironmentDiffuseScale=L_ORIG.Props.EnvironmentDiffuseScale end
+            if L_ORIG.Props.ShadowSoftness then Lighting.ShadowSoftness=L_ORIG.Props.ShadowSoftness end
+        end)
+        local Terrain = workspace and workspace:FindFirstChildOfClass("Terrain")
+        if Terrain then
+            pcall(function()
+                if L_ORIG.Props.WaterWaveSize~=nil then Terrain.WaterWaveSize=L_ORIG.Props.WaterWaveSize end
+                if L_ORIG.Props.WaterWaveSpeed~=nil then Terrain.WaterWaveSpeed=L_ORIG.Props.WaterWaveSpeed end
+                if L_ORIG.Props.WaterReflectance~=nil then Terrain.WaterReflectance=L_ORIG.Props.WaterReflectance end
+                if L_ORIG.Props.WaterTransparency~=nil then Terrain.WaterTransparency=L_ORIG.Props.WaterTransparency end
+            end)
+        end
+    end
+    L_ORIG.Effects, L_ORIG.Atmospheres = {}, {}
+end
+
+-- encolas candidatos (mapa) respetando brainrots
+function enqueuePotatoCandidate(root)
+    if not isValid(root) then return end
+    if inBrainrot(root) then return end
+    pq_push(root)
+    for _,ch in ipairs(root:GetDescendants()) do
+        if isValid(ch) and not inBrainrot(ch) then pq_push(ch) end
+    end
+end
+
+-- proceso incremental por frame
+local function processPotatoQueueStep()
+    local budget = POTATO_SCAN_BUDGET
+    while budget>0 do
+        local node = pq_pop()
+        if not node then break end
+        potatoApplyOne(node)
+        budget -= 1
+    end
+end
+
+-- limpiar/restaurar estado en todo lo tocado
+local function potatoRestoreAll()
+    for inst,val in pairs(P_ORIG.CastShadow) do if isValid(inst) then pcall(function() inst.CastShadow=val end) end; P_ORIG.CastShadow[inst]=nil end
+    for inst,val in pairs(P_ORIG.RenderFidelity) do if isValid(inst) then pcall(function() inst.RenderFidelity=val end) end; P_ORIG.RenderFidelity[inst]=nil end
+    for inst,val in pairs(P_ORIG.LightEnabled) do if isValid(inst) then pcall(function() inst.Enabled=val end) end; P_ORIG.LightEnabled[inst]=nil end
+    for inst,val in pairs(P_ORIG.ParticleEnabled) do if isValid(inst) then pcall(function() inst.Enabled=val end) end; P_ORIG.ParticleEnabled[inst]=nil end
+    for inst,val in pairs(P_ORIG.ParticleRate) do if isValid(inst) then pcall(function() inst.Rate=val end) end; P_ORIG.ParticleRate[inst]=nil end
+    for inst,val in pairs(P_ORIG.TrailEnabled) do if isValid(inst) then pcall(function() inst.Enabled=val end) end; P_ORIG.TrailEnabled[inst]=nil end
+    for inst,val in pairs(P_ORIG.BeamEnabled) do if isValid(inst) then pcall(function() inst.Enabled=val end) end; P_ORIG.BeamEnabled[inst]=nil end
+    for inst,val in pairs(P_ORIG.DecalTransparency) do if isValid(inst) then pcall(function() inst.Transparency=val end) end; P_ORIG.DecalTransparency[inst]=nil end
+    for inst,val in pairs(P_ORIG.TextureTransparency) do if isValid(inst) then pcall(function() inst.Transparency=val end) end; P_ORIG.TextureTransparency[inst]=nil end
+    pq_reset()
+end
+
+-- activar/desactivar Potato MAPA
 local function applyPotato(on)
     potatoOn = on
     if on then
-        MARK_DURATION   = POTATO.MARK_DURATION
-        RAINBOW_SPEED   = POTATO.RAINBOW_SPEED
-        SCAN_STEP_BUDGET= POTATO.SCAN_STEP_BUDGET
-        CONT_SCAN_PERIOD= POTATO.CONT_SCAN_PERIOD
-        PLAYER_LINE_FPS = POTATO.PLAYER_LINE_FPS
-        SPECIAL_PULSE_SPEED = POTATO.PULSE
-        setBillboardsMaxDistance(POTATO.BILLBOARD_MAXDIST)
-        setLinesMaterial(true)
-        if isValid(mainShadow) then mainShadow.Visible=false end
-        if grad then grad.Enabled=false end
+        potatoLightingOn()
+        enqueuePotatoCandidate(workspace)
+        toast("🧪 Gráficos suaves (MAPA) activados")
+        -- bloquear X-RAY si estuviera encendido (ambos manipulan el mapa)
         if xrayEnabled then disableXRay(); swXRay.set(false) end
-        toast("🧪 Gráficos suaves activados")
     else
-        MARK_DURATION   = NORMALS.MARK_DURATION
-        RAINBOW_SPEED   = NORMALS.RAINBOW_SPEED
-        SCAN_STEP_BUDGET= NORMALS.SCAN_STEP_BUDGET
-        CONT_SCAN_PERIOD= NORMALS.CONT_SCAN_PERIOD
-        PLAYER_LINE_FPS = NORMALS.PLAYER_LINE_FPS
-        SPECIAL_PULSE_SPEED = NORMALS.PULSE
-        setBillboardsMaxDistance(NORMALS.BILLBOARD_MAXDIST)
-        setLinesMaterial(false)
-        if isValid(mainShadow) then mainShadow.Visible=true end
-        if grad then grad.Enabled=true end
-        toast("✨ Gráficos normales restaurados")
+        potatoLightingOff()
+        potatoRestoreAll()
+        toast("✨ Gráficos del mapa restaurados")
     end
 end
 -- ======================================
+
+-- estado toggles
+local espEnabled=false; local contEnabled=true; local notifEnabled=true
 
 -- lógica switches
 swNight.btn.MouseButton1Click:Connect(function() themeModeNight=not themeModeNight; applyTheme() end)
@@ -627,7 +713,7 @@ swCont.btn.MouseButton1Click:Connect(function() contEnabled=not contEnabled; swC
 swNotif.btn.MouseButton1Click:Connect(function() notifEnabled=not notifEnabled; swNotif.set(notifEnabled) end)
 swPlayer.btn.MouseButton1Click:Connect(function() playerESPEnabled=not playerESPEnabled; swPlayer.set(playerESPEnabled); if playerESPEnabled then for _,p in ipairs(Players:GetPlayers()) do if p~=LP then createPlayerESP(p) end end else clearPlayerESP() end end)
 swXRay.btn.MouseButton1Click:Connect(function()
-    if potatoOn then toast("⚠️ X-RAY bloqueado en modo Gráficos suaves"); swXRay.set(false); return end
+    if potatoOn then toast("⚠️ X-RAY bloqueado en modo Gráficos suaves (MAPA)"); swXRay.set(false); return end
     xrayEnabled=not xrayEnabled; swXRay.set(xrayEnabled); if xrayEnabled then enableXRay() else disableXRay() end
 end)
 swGhost.btn.MouseButton1Click:Connect(function() if ghostEnabled then ghostOff() else ghostOn() end; swGhost.set(ghostEnabled) end)
@@ -651,10 +737,12 @@ local function UNLOAD()
     if playerESPEnabled then clearPlayerESP() end
     if gameNightEnabled then disableGameNight() end
     if defaultSkyEnabled then restoreOriginalSkies() end
+    if potatoOn then applyPotato(false) end
     for inst,data in pairs(activeMarks) do safeDestroy(data.hl) activeMarks[inst]=nil end
     for inst,s in pairs(specialBrainrotLines) do freeLine(s.line) specialBrainrotLines[inst]=nil end
     disconnectAll(); safeDestroy(gui); G.__BRAINROT_ESP_RUNNING=false; toast("ESP descargado", Color3.fromRGB(180,90,90))
 end
+local btnReset=body:FindFirstChildWhichIsA("TextButton") or nil -- ya creado arriba
 btnReset.MouseButton1Click:Connect(RESET_ESP)
 btnUnload.MouseButton1Click:Connect(UNLOAD)
 G.BRAINROT_UNLOAD=UNLOAD
@@ -670,7 +758,7 @@ end)
 safeConnect(Players.PlayerRemoving,function(p) local d=playerESPData[p.UserId]; if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[p.UserId]=nil end end)
 for _,p in ipairs(Players:GetPlayers()) do if p~=LP then p.CharacterAdded:Connect(function() if playerESPEnabled then task.wait(0.2); local d=playerESPData[p.UserId]; if d then safeDestroy(d.hl) freeLine(d.line) safeDestroy(d.bb) playerESPData[p.UserId]=nil end; createPlayerESP(p) end end) end end
 
--- loop
+-- loop principal
 local lastCont=0
 safeConnect(RunService.Heartbeat,function()
     local tNow = time()
@@ -689,7 +777,6 @@ safeConnect(RunService.Heartbeat,function()
                         local dir=tpos-myPos; local dist=dir.Magnitude
                         L.Size=Vector3.new(0.28,0.28,math.max(dist,0.5))
                         L.CFrame=CFrame.lookAt(myPos+dir*0.5,tpos)
-                        -- Pulso bi-color para líneas de especiales
                         local s = 0.5 + 0.5 * math.sin(tNow * SPECIAL_PULSE_SPEED)
                         s = s*0.7
                         L.Color = pack.baseLine:Lerp(RED_STRONG, s)
@@ -700,7 +787,8 @@ safeConnect(RunService.Heartbeat,function()
             end
         end
     end
+    if potatoOn then processPotatoQueueStep() end
     if playerESPEnabled then updatePlayerESPLines() end
     local cB,cP=0,0; for _ in pairs(activeMarks) do cB+=1 end; for _ in pairs(playerESPData) do cP+=1 end
-    status.Text=string.format("Brainrots activos: %d  |  Players ESP: %d  |  [T] UI  |  Potato:%s", cB, cP, potatoOn and "ON" or "OFF")
+    status.Text=string.format("Brainrots activos: %d  |  Players ESP: %d  |  Potato MAPA:%s  |  [T] UI", cB, cP, potatoOn and "ON" or "OFF")
 end)
