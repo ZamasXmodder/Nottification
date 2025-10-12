@@ -60,7 +60,7 @@ local function pulseAlpha(t, speed)
     return 0.5 + 0.5 * math.sin(t * speed)
 end
 
--- targets (con nombre corregido)
+-- targets
 local targetNames={
     "La Secret Combinasion","Burguro And Fryuro","Los 67","Chillin Chili","Tang Tang Keletang",
     "Money Money Puggy","Los Primos","Los Tacoritas","La Grande Combinasion","Pot Hotspot",
@@ -169,7 +169,8 @@ end
 
 -- estructuras especiales
 local specialBrainrotLines=setmetatable({}, {__mode="k"}) -- {inst={line,color,baseFill,baseLine}}
--- markOnce (mantener comportamiento + extra de oscuros + setup pulso)
+
+-- markOnce (incluye setup del pulso en especiales)
 local function markOnce(inst)
     if not isValid(inst) or everMarked[inst] then return end
     if not (inst:IsA("Model") or inst:IsA("BasePart")) then return end
@@ -180,7 +181,7 @@ local function markOnce(inst)
     unXrayBrainrot(inst)
 
     local hl=newHighlight(inst)
-    -- base inicial para comunes
+    -- base para comunes
     hl.FillColor=hsv(rainbowHue)
     activeMarks[inst]={hl=hl, createdAt=time(), baseHue=rainbowHue}
 
@@ -239,26 +240,25 @@ local function cleanupExpired()
     end
 end
 
+-- *** FIX Luau (sin goto): pulso oscuro<->rojo en especiales, arcoíris en el resto
 local function updateColors()
     local tNow = time()
-    for inst,data in pairs(activeMarks) do
-        local hl=data.hl
-        if not isValid(hl) then goto cont end
-
-        local spec = specialDarkMap[inst.Name]
-        if spec then
-            -- Pulso bi-color solo para especiales
-            local s = pulseAlpha(tNow, SPECIAL_PULSE_SPEED)
-            -- más tiempo en oscuro (biased): curva suave
-            s = s*0.7 -- 0..0.7
-            local fill = spec.fill:Lerp(RED_STRONG, s)
-            hl.FillColor = fill
-        else
-            -- normales siguen arcoíris
-            local hue=(data.baseHue+(tNow-data.createdAt)*RAINBOW_SPEED)%1
-            hl.FillColor=hsv(hue)
+    for inst, data in pairs(activeMarks) do
+        local hl = data.hl
+        if isValid(hl) then
+            local spec = specialDarkMap[inst.Name]
+            if spec then
+                local s = 0.5 + 0.5 * math.sin(tNow * SPECIAL_PULSE_SPEED) -- 0..1
+                s = s * 0.7  -- sesgo a oscuro
+                local fill = spec.fill:Lerp(RED_STRONG, s)
+                hl.FillColor = fill
+                hl.OutlineTransparency = 0.05
+                hl.OutlineColor = Color3.fromRGB(8, 8, 10)
+            else
+                local hue = (data.baseHue + (tNow - data.createdAt) * RAINBOW_SPEED) % 1
+                hl.FillColor = hsv(hue)
+            end
         end
-        ::cont::
     end
 end
 
@@ -267,10 +267,8 @@ end
 -- =========================
 local SoundService = safeService("SoundService")
 local ContentProvider = safeService("ContentProvider")
-
 local NOTIF_ID = "rbxassetid://77665577458181"
 
--- plantilla base (se clonará en cada ping para asegurar reinicio)
 local baseNotif = Instance.new("Sound")
 baseNotif.Name = "ESP_JoinPingTemplate"
 baseNotif.SoundId = NOTIF_ID
@@ -279,7 +277,6 @@ baseNotif.PlaybackSpeed = 1
 baseNotif.RollOffMode = Enum.RollOffMode.InverseTapered
 baseNotif.EmitterSize = 5
 baseNotif.Looped = false
--- fallback si no hay SoundService
 if not SoundService then baseNotif.Parent = playerGui end
 
 local lastPingAt = 0
@@ -477,7 +474,14 @@ local function applyTheme()
     local t=themeModeNight and theme.night or theme.day
     main.BackgroundColor3=t.mainBg; mainStroke.Color=t.stroke; title.TextColor3=t.text; minimize.TextColor3=Color3.fromRGB(255,255,255); status.TextColor3=t.muted; header.BackgroundColor3=t.headerBg
     local sws={swNight,swGameNight,swESP,swCont,swNotif,swPlayer,swXRay,swGhost,swSky,swPotato}
-    for _,s in ipairs(sws) do if s.label then s.label.TextColor3=t.text end; if s.tip then s.tip.TextColor3=t.muted end; if s.stroke then s.stroke.Color=t.stroke end; s.set(s.get()); s.knob.BackgroundColor3=Color3.new(1,1,1); s.bg.BackgroundColor3=themeModeNight and Color3.fromRGB(22,22,28) or Color3.fromRGB(250,250,255) end
+    for _,s in ipairs(sws) do
+        if s.label then s.label.TextColor3=t.text end
+        if s.tip then s.tip.TextColor3=t.muted end
+        if s.stroke then s.stroke.Color=t.stroke end
+        s.set(s.get())
+        s.knob.BackgroundColor3=Color3.new(1,1,1)
+        s.bg.BackgroundColor3=themeModeNight and Color3.fromRGB(22,22,28) or Color3.fromRGB(250,250,255)
+    end
     btnReset.BackgroundColor3=themeModeNight and theme.night.btnReset or theme.day.btnReset
     btnUnload.BackgroundColor3=themeModeNight and theme.night.btnOff or theme.day.btnOff
 end
@@ -556,7 +560,7 @@ local NORMALS = {
 }
 local POTATO = {
     MARK_DURATION=9,  RAINBOW_SPEED=0.18, SCAN_STEP_BUDGET=700,
-    CONT_SCAN_PERIOD=3.5, PLAYER_LINE_FPS=18, BILLBOARD_MAXDIST=1500, PULSE=0.7  -- pulso más lento en potato
+    CONT_SCAN_PERIOD=3.5, PLAYER_LINE_FPS=18, BILLBOARD_MAXDIST=1500, PULSE=0.7
 }
 
 local function setLinesMaterial(plastic)
@@ -686,7 +690,7 @@ safeConnect(RunService.Heartbeat,function()
                         L.Size=Vector3.new(0.28,0.28,math.max(dist,0.5))
                         L.CFrame=CFrame.lookAt(myPos+dir*0.5,tpos)
                         -- Pulso bi-color para líneas de especiales
-                        local s = pulseAlpha(tNow, SPECIAL_PULSE_SPEED)
+                        local s = 0.5 + 0.5 * math.sin(tNow * SPECIAL_PULSE_SPEED)
                         s = s*0.7
                         L.Color = pack.baseLine:Lerp(RED_STRONG, s)
                     end
