@@ -3,6 +3,8 @@
 --//  Brainrots ESP (líneas & highlights especiales) + Player ESP + Notifs
 --//  X-Ray + Ghost + Game Night + Sky predeterminado Roblox (FORZADO)
 --//  GUI pro (gradiente, sombra, scroll, tecla [T])
+--//  + Gráficos suaves (Potato) para menos lag
+--//  + Specials: pulso oscuro <-> rojo (highlight y línea)
 --// =========================
 
 -- anti doble ejecución
@@ -42,11 +44,23 @@ local CONNECTIONS={}
 local function safeConnect(signal,fn) local c=signal:Connect(function(...) pcall(fn,...) end) table.insert(CONNECTIONS,c) return c end
 local function disconnectAll() for _,c in ipairs(CONNECTIONS) do pcall(function() c:Disconnect() end) end table.clear(CONNECTIONS) end
 
--- parámetros
-local MARK_DURATION=15; local RAINBOW_SPEED=0.35; local SCAN_STEP_BUDGET=1200
-local CONT_SCAN_PERIOD=2; local PLAYER_LINE_FPS=30; local XRAY_TRANSPARENCY=0.8
+-- parámetros (valores normales por defecto)
+local MARK_DURATION=15
+local RAINBOW_SPEED=0.35
+local SCAN_STEP_BUDGET=1200
+local CONT_SCAN_PERIOD=2
+local PLAYER_LINE_FPS=30
+local XRAY_TRANSPARENCY=0.8
 
--- targets (con nombre corregido: Tang Tang Keletang -> Tang Tang Keletang (Keletang))
+-- ===== Specials pulse config =====
+local RED_STRONG = Color3.fromRGB(220,40,40)         -- rojo fuerte
+local SPECIAL_PULSE_SPEED = 1.2                      -- velocidad de pulso (ajustable por Potato)
+local function pulseAlpha(t, speed)
+    -- seno suave 0->1
+    return 0.5 + 0.5 * math.sin(t * speed)
+end
+
+-- targets (con nombre corregido)
 local targetNames={
     "La Secret Combinasion","Burguro And Fryuro","Los 67","Chillin Chili","Tang Tang Keletang",
     "Money Money Puggy","Los Primos","Los Tacoritas","La Grande Combinasion","Pot Hotspot",
@@ -60,21 +74,21 @@ local targetNames={
 }
 local targetSet={} for _,n in ipairs(targetNames) do targetSet[n]=true end
 
--- colores oscuros por brainrot (actualizado Keletang)
+-- colores oscuros por brainrot (más fuertes)
 local specialDarkMap={
-    ["La Secret Combinasion"]={line=Color3.fromRGB(40,40,55), fill=Color3.fromRGB(35,35,48)},
-    ["Burguro And Fryuro"]   ={line=Color3.fromRGB(60,40,40), fill=Color3.fromRGB(52,32,32)},
-    ["Tang Tang Keletang"]   ={line=Color3.fromRGB(30,55,50), fill=Color3.fromRGB(24,46,42)},
-    ["Strawberry Elephant"]  ={line=Color3.fromRGB(55,35,45), fill=Color3.fromRGB(46,28,38)},
-    ["Ketchuru and Musturu"] ={line=Color3.fromRGB(55,45,30), fill=Color3.fromRGB(44,36,24)},
-    ["Tictac Sahur"]         ={line=Color3.fromRGB(35,45,60), fill=Color3.fromRGB(28,36,50)},
-    ["Nuclearo Dinosauro"]   ={line=Color3.fromRGB(45,60,45), fill=Color3.fromRGB(36,50,36)},
-    ["Tralaledon"]           ={line=Color3.fromRGB(50,35,55), fill=Color3.fromRGB(40,28,44)},
-    ["Ketupat Kepat"]        ={line=Color3.fromRGB(45,50,35), fill=Color3.fromRGB(36,40,28)},
-    ["La Supreme Combinasion"]={line=Color3.fromRGB(60,50,35), fill=Color3.fromRGB(48,40,28)},
-    ["Garama and Madundung"] ={line=Color3.fromRGB(35,55,60), fill=Color3.fromRGB(28,46,50)},
-    ["Dragon Cannelloni"]    ={line=Color3.fromRGB(60,35,35), fill=Color3.fromRGB(50,28,28)},
-    ["Spooky and Pumpky"]    ={line=Color3.fromRGB(60,35,35), fill=Color3.fromRGB(50,28,28)},
+    ["La Secret Combinasion"]={line=Color3.fromRGB(28,28,40), fill=Color3.fromRGB(24,24,34)},
+    ["Burguro And Fryuro"]   ={line=Color3.fromRGB(40,26,26), fill=Color3.fromRGB(34,22,22)},
+    ["Tang Tang Keletang"]   ={line=Color3.fromRGB(22,42,38), fill=Color3.fromRGB(18,34,31)},
+    ["Strawberry Elephant"]  ={line=Color3.fromRGB(42,26,34), fill=Color3.fromRGB(34,20,28)},
+    ["Ketchuru and Musturu"] ={line=Color3.fromRGB(44,36,22), fill=Color3.fromRGB(36,30,18)},
+    ["Tictac Sahur"]         ={line=Color3.fromRGB(26,34,46), fill=Color3.fromRGB(20,26,38)},
+    ["Nuclearo Dinosauro"]   ={line=Color3.fromRGB(34,46,34), fill=Color3.fromRGB(26,38,26)},
+    ["Tralaledon"]           ={line=Color3.fromRGB(38,26,42), fill=Color3.fromRGB(30,20,34)},
+    ["Ketupat Kepat"]        ={line=Color3.fromRGB(34,38,26), fill=Color3.fromRGB(26,30,20)},
+    ["La Supreme Combinasion"]={line=Color3.fromRGB(46,38,26), fill=Color3.fromRGB(38,30,20)},
+    ["Garama and Madundung"] ={line=Color3.fromRGB(26,42,46), fill=Color3.fromRGB(20,34,38)},
+    ["Dragon Cannelloni"]    ={line=Color3.fromRGB(46,26,26), fill=Color3.fromRGB(38,20,20)},
+    ["Spooky and Pumpky"]    ={line=Color3.fromRGB(46,26,26), fill=Color3.fromRGB(38,20,20)},
 }
 
 -- estado esp
@@ -99,7 +113,7 @@ local function cleanupBrainrotRoots() for r,_ in pairs(brainrotRoots) do if not 
 -- highlight base
 local function newHighlight(t)
     local h=Instance.new("Highlight")
-    h.Adornee=t; h.FillTransparency=0.45; h.OutlineTransparency=0.15
+    h.Adornee=t; h.FillTransparency=0.45; h.OutlineTransparency=0.12
     h.OutlineColor=Color3.new(1,1,1); h.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
     h.Parent=workspace; return h
 end
@@ -154,9 +168,8 @@ local function getWorldPos(obj)
 end
 
 -- estructuras especiales
-local specialBrainrotLines=setmetatable({}, {__mode="k"})
-
--- markOnce (mantener comportamiento + extra de oscuros)
+local specialBrainrotLines=setmetatable({}, {__mode="k"}) -- {inst={line,color,baseFill,baseLine}}
+-- markOnce (mantener comportamiento + extra de oscuros + setup pulso)
 local function markOnce(inst)
     if not isValid(inst) or everMarked[inst] then return end
     if not (inst:IsA("Model") or inst:IsA("BasePart")) then return end
@@ -167,17 +180,24 @@ local function markOnce(inst)
     unXrayBrainrot(inst)
 
     local hl=newHighlight(inst)
+    -- base inicial para comunes
     hl.FillColor=hsv(rainbowHue)
     activeMarks[inst]={hl=hl, createdAt=time(), baseHue=rainbowHue}
 
+    -- especiales: más oscuro y outline muy oscuro
     local spec=specialDarkMap[inst.Name]
     if spec then
         if isValid(hl) then
-            hl.FillTransparency=0.55; hl.OutlineTransparency=0.05
-            hl.OutlineColor=Color3.fromRGB(10,10,12); hl.FillColor=spec.fill
+            hl.FillTransparency=0.48
+            hl.OutlineTransparency=0.05
+            hl.OutlineColor=Color3.fromRGB(8,8,10)
+            hl.FillColor=spec.fill
         end
-        local L=getLine(); L.Color=spec.line; L.Material=Enum.Material.Neon; L.Transparency=0.15
-        specialBrainrotLines[inst]={line=L, color=spec.line}
+        local L=getLine()
+        L.Material=Enum.Material.Neon
+        L.Transparency=0.14
+        L.Color=spec.line
+        specialBrainrotLines[inst]={line=L, color=spec.line, baseFill=spec.fill, baseLine=spec.line}
     end
 end
 
@@ -218,15 +238,27 @@ local function cleanupExpired()
         if not isValid(inst) or not activeMarks[inst] then freeLine(s.line); specialBrainrotLines[inst]=nil end
     end
 end
+
 local function updateColors()
+    local tNow = time()
     for inst,data in pairs(activeMarks) do
         local hl=data.hl
-        if isValid(hl) then
-            if not specialDarkMap[inst.Name] then
-                local hue=(data.baseHue+(time()-data.createdAt)*RAINBOW_SPEED)%1
-                hl.FillColor=hsv(hue)
-            end
+        if not isValid(hl) then goto cont end
+
+        local spec = specialDarkMap[inst.Name]
+        if spec then
+            -- Pulso bi-color solo para especiales
+            local s = pulseAlpha(tNow, SPECIAL_PULSE_SPEED)
+            -- más tiempo en oscuro (biased): curva suave
+            s = s*0.7 -- 0..0.7
+            local fill = spec.fill:Lerp(RED_STRONG, s)
+            hl.FillColor = fill
+        else
+            -- normales siguen arcoíris
+            local hue=(data.baseHue+(tNow-data.createdAt)*RAINBOW_SPEED)%1
+            hl.FillColor=hsv(hue)
         end
+        ::cont::
     end
 end
 
@@ -253,7 +285,6 @@ if not SoundService then baseNotif.Parent = playerGui end
 local lastPingAt = 0
 local function playNotificationSound()
     local now = time()
-    -- micro-debounce para ráfagas de PlayerAdded simultáneos
     if now - lastPingAt < 0.15 then return end
     lastPingAt = now
 
@@ -267,7 +298,6 @@ local function playNotificationSound()
         pcall(function() s:Play() end)
         s.Ended:Once(function() pcall(function() s:Destroy() end) end)
     else
-        -- Fallback: usar una sola instancia en GUI, forzando reinicio
         if not isValid(baseNotif.Parent) then baseNotif.Parent = playerGui end
         pcall(function()
             baseNotif:Stop()
@@ -370,7 +400,7 @@ local function disableGameNight() gameNightEnabled=false; if nightConn then pcal
 
 -- GUI
 local gui=Instance.new("ScreenGui"); gui.Name="GUI_"..G.BRAINROT_ESP_NAME; gui.ResetOnSpawn=false; gui.Parent=playerGui
-local main=Instance.new("Frame"); main.Size=UDim2.new(0,300,0,520); main.Position=UDim2.new(1,-310,0,12); main.Active=true; main.Draggable=true; main.Parent=gui
+local main=Instance.new("Frame"); main.Size=UDim2.new(0,300,0,540); main.Position=UDim2.new(1,-310,0,12); main.Active=true; main.Draggable=true; main.Parent=gui
 Instance.new("UICorner",main).CornerRadius=UDim.new(0,14)
 local mainStroke=Instance.new("UIStroke"); mainStroke.Thickness=2; mainStroke.Color=theme.night.stroke; mainStroke.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; mainStroke.Parent=main
 local mainShadow=Instance.new("ImageLabel"); mainShadow.BackgroundTransparency=1; mainShadow.Image="rbxassetid://1316045217"; mainShadow.ScaleType=Enum.ScaleType.Slice; mainShadow.SliceCenter=Rect.new(10,10,118,118); mainShadow.ImageTransparency=0.6; mainShadow.Size=UDim2.new(1,36,1,36); mainShadow.Position=UDim2.new(0,-18,0,-18); mainShadow.ZIndex=0; mainShadow.Parent=main
@@ -380,7 +410,7 @@ local title=Instance.new("TextLabel"); title.BackgroundTransparency=1; title.Siz
 local minimize=Instance.new("TextButton"); minimize.Size=UDim2.new(0,34,0,34); minimize.Position=UDim2.new(1,-42,0.5,-17); minimize.Text="–"; minimize.Font=Enum.Font.GothamBold; minimize.TextScaled=true; minimize.TextColor3=Color3.fromRGB(255,255,255); minimize.BackgroundTransparency=0.15; minimize.Parent=header
 Instance.new("UICorner",minimize).CornerRadius=UDim.new(0,8)
 
-local body=Instance.new("ScrollingFrame"); body.Size=UDim2.new(1,-22,1,-120); body.Position=UDim2.new(0,11,0,64); body.Parent=main
+local body=Instance.new("ScrollingFrame"); body.Size=UDim2.new(1,-22,1,-140); body.Position=UDim2.new(0,11,0,64); body.Parent=main
 body.Active=true; body.ScrollingEnabled=true; body.ScrollingDirection=Enum.ScrollingDirection.Y; body.CanvasSize=UDim2.new(0,0,0,0)
 local hasAuto=pcall(function() body.AutomaticCanvasSize=Enum.AutomaticSize.Y end)
 body.ScrollBarThickness=6; body.ScrollBarImageTransparency=0.2; body.ScrollBarImageColor3=Color3.fromRGB(120,120,140)
@@ -424,6 +454,7 @@ local swPlayer    = makeSwitch("ESP de jugadores", false, "Línea + nombre + dis
 local swXRay      = makeSwitch("X-RAY del mapa (80%)", false, "Oculta mapa sin brainrots")
 local swGhost     = makeSwitch("Espíritu (Yo 70%)", false, "Transparencia personaje")
 local swSky       = makeSwitch("Sky predeterminado (Roblox)", false, "Forzar sky azul y bloquear reemplazos")
+local swPotato    = makeSwitch("Gráficos suaves (Potato)", false, "Optimiza efectos y escaneo para bajo rendimiento")
 
 local btnReset=makeButton("RESET ESP", Color3.fromRGB(70,110,255), 200)
 local btnUnload=makeButton("UNLOAD", Color3.fromRGB(90,90,95), 201)
@@ -432,8 +463,8 @@ local btnUnload=makeButton("UNLOAD", Color3.fromRGB(90,90,95), 201)
 local collapsed=false
 minimize.MouseButton1Click:Connect(function()
     collapsed=not collapsed
-    if collapsed then TweenService:Create(main,TweenInfo.new(0.22),{Size=UDim2.new(0,300,0,92)}):Play(); body.Visible=false; status.Visible=false; minimize.Text="+"
-    else TweenService:Create(main,TweenInfo.new(0.22),{Size=UDim2.new(0,300,0,520)}):Play(); task.wait(0.22); body.Visible=true; status.Visible=true; minimize.Text="–" end
+    if collapsed then TweenService:Create(main,TweenInfo.new(0.22),{Size=UDim2.new(0,300,0,112)}):Play(); body.Visible=false; status.Visible=false; minimize.Text="+"
+    else TweenService:Create(main,TweenInfo.new(0.22),{Size=UDim2.new(0,300,0,540)}):Play(); task.wait(0.22); body.Visible=true; status.Visible=true; minimize.Text="–" end
 end)
 
 -- [T]
@@ -445,7 +476,7 @@ safeConnect(UserInput.InputBegan,function(inp,gp) if gp then return end if inp.K
 local function applyTheme()
     local t=themeModeNight and theme.night or theme.day
     main.BackgroundColor3=t.mainBg; mainStroke.Color=t.stroke; title.TextColor3=t.text; minimize.TextColor3=Color3.fromRGB(255,255,255); status.TextColor3=t.muted; header.BackgroundColor3=t.headerBg
-    local sws={swNight,swGameNight,swESP,swCont,swNotif,swPlayer,swXRay,swGhost,swSky}
+    local sws={swNight,swGameNight,swESP,swCont,swNotif,swPlayer,swXRay,swGhost,swSky,swPotato}
     for _,s in ipairs(sws) do if s.label then s.label.TextColor3=t.text end; if s.tip then s.tip.TextColor3=t.muted end; if s.stroke then s.stroke.Color=t.stroke end; s.set(s.get()); s.knob.BackgroundColor3=Color3.new(1,1,1); s.bg.BackgroundColor3=themeModeNight and Color3.fromRGB(22,22,28) or Color3.fromRGB(250,250,255) end
     btnReset.BackgroundColor3=themeModeNight and theme.night.btnReset or theme.day.btnReset
     btnUnload.BackgroundColor3=themeModeNight and theme.night.btnOff or theme.day.btnOff
@@ -491,7 +522,6 @@ end
 local function applyDefaultSkyForced()
     removeAllSkiesExceptDefault()
     createDefaultSky()
-    -- guardian RenderStepped: reimpone default y elimina intrusos cada frame
     if not skyGuardianConn then
         skyGuardianConn = RunService.RenderStepped:Connect(function()
             if not defaultSkyEnabled then return end
@@ -502,7 +532,6 @@ local function applyDefaultSkyForced()
             end
         end)
     end
-    -- hook de DescendantAdded para interceptar skies apenas aparezcan
     if not skyAddedConn then
         skyAddedConn = Lighting.DescendantAdded:Connect(function(obj)
             if not defaultSkyEnabled then return end
@@ -519,6 +548,69 @@ local function restoreOriginalSkies()
     table.clear(removedSkies)
 end
 
+-- ====== GRÁFICOS SUAVES (POTATO) ======
+local potatoOn=false
+local NORMALS = {
+    MARK_DURATION=15, RAINBOW_SPEED=0.35, SCAN_STEP_BUDGET=1200,
+    CONT_SCAN_PERIOD=2, PLAYER_LINE_FPS=30, BILLBOARD_MAXDIST=3000, PULSE=SPECIAL_PULSE_SPEED
+}
+local POTATO = {
+    MARK_DURATION=9,  RAINBOW_SPEED=0.18, SCAN_STEP_BUDGET=700,
+    CONT_SCAN_PERIOD=3.5, PLAYER_LINE_FPS=18, BILLBOARD_MAXDIST=1500, PULSE=0.7  -- pulso más lento en potato
+}
+
+local function setLinesMaterial(plastic)
+    for _,d in pairs(playerESPData) do
+        if d.line and isValid(d.line) then
+            d.line.Material = plastic and Enum.Material.Plastic or Enum.Material.ForceField
+            d.line.Transparency = plastic and 0.2 or 0.1
+        end
+    end
+    for _,pack in pairs(specialBrainrotLines) do
+        if pack.line and isValid(pack.line) then
+            pack.line.Material = plastic and Enum.Material.Plastic or Enum.Material.Neon
+            pack.line.Transparency = plastic and 0.2 or 0.14
+        end
+    end
+end
+
+local function setBillboardsMaxDistance(dist)
+    for _,d in pairs(playerESPData) do
+        if d.bb and isValid(d.bb) then d.bb.MaxDistance = dist end
+    end
+end
+
+local function applyPotato(on)
+    potatoOn = on
+    if on then
+        MARK_DURATION   = POTATO.MARK_DURATION
+        RAINBOW_SPEED   = POTATO.RAINBOW_SPEED
+        SCAN_STEP_BUDGET= POTATO.SCAN_STEP_BUDGET
+        CONT_SCAN_PERIOD= POTATO.CONT_SCAN_PERIOD
+        PLAYER_LINE_FPS = POTATO.PLAYER_LINE_FPS
+        SPECIAL_PULSE_SPEED = POTATO.PULSE
+        setBillboardsMaxDistance(POTATO.BILLBOARD_MAXDIST)
+        setLinesMaterial(true)
+        if isValid(mainShadow) then mainShadow.Visible=false end
+        if grad then grad.Enabled=false end
+        if xrayEnabled then disableXRay(); swXRay.set(false) end
+        toast("🧪 Gráficos suaves activados")
+    else
+        MARK_DURATION   = NORMALS.MARK_DURATION
+        RAINBOW_SPEED   = NORMALS.RAINBOW_SPEED
+        SCAN_STEP_BUDGET= NORMALS.SCAN_STEP_BUDGET
+        CONT_SCAN_PERIOD= NORMALS.CONT_SCAN_PERIOD
+        PLAYER_LINE_FPS = NORMALS.PLAYER_LINE_FPS
+        SPECIAL_PULSE_SPEED = NORMALS.PULSE
+        setBillboardsMaxDistance(NORMALS.BILLBOARD_MAXDIST)
+        setLinesMaterial(false)
+        if isValid(mainShadow) then mainShadow.Visible=true end
+        if grad then grad.Enabled=true end
+        toast("✨ Gráficos normales restaurados")
+    end
+end
+-- ======================================
+
 -- lógica switches
 swNight.btn.MouseButton1Click:Connect(function() themeModeNight=not themeModeNight; applyTheme() end)
 swGameNight.btn.MouseButton1Click:Connect(function() local on=not swGameNight.get(); swGameNight.set(on); if on then enableGameNight() else disableGameNight() end end)
@@ -530,13 +622,17 @@ end)
 swCont.btn.MouseButton1Click:Connect(function() contEnabled=not contEnabled; swCont.set(contEnabled) end)
 swNotif.btn.MouseButton1Click:Connect(function() notifEnabled=not notifEnabled; swNotif.set(notifEnabled) end)
 swPlayer.btn.MouseButton1Click:Connect(function() playerESPEnabled=not playerESPEnabled; swPlayer.set(playerESPEnabled); if playerESPEnabled then for _,p in ipairs(Players:GetPlayers()) do if p~=LP then createPlayerESP(p) end end else clearPlayerESP() end end)
-swXRay.btn.MouseButton1Click:Connect(function() xrayEnabled=not xrayEnabled; swXRay.set(xrayEnabled); if xrayEnabled then enableXRay() else disableXRay() end end)
+swXRay.btn.MouseButton1Click:Connect(function()
+    if potatoOn then toast("⚠️ X-RAY bloqueado en modo Gráficos suaves"); swXRay.set(false); return end
+    xrayEnabled=not xrayEnabled; swXRay.set(xrayEnabled); if xrayEnabled then enableXRay() else disableXRay() end
+end)
 swGhost.btn.MouseButton1Click:Connect(function() if ghostEnabled then ghostOff() else ghostOn() end; swGhost.set(ghostEnabled) end)
 swSky.btn.MouseButton1Click:Connect(function()
     defaultSkyEnabled=not defaultSkyEnabled; swSky.set(defaultSkyEnabled)
     if defaultSkyEnabled then applyDefaultSkyForced(); toast("🌤️ Sky Roblox forzado")
     else restoreOriginalSkies(); toast("☁️ Sky original restaurado") end
 end)
+swPotato.btn.MouseButton1Click:Connect(function() local on = not swPotato.get(); swPotato.set(on); applyPotato(on) end)
 
 -- reset / unload
 local function RESET_ESP()
@@ -573,10 +669,11 @@ for _,p in ipairs(Players:GetPlayers()) do if p~=LP then p.CharacterAdded:Connec
 -- loop
 local lastCont=0
 safeConnect(RunService.Heartbeat,function()
+    local tNow = time()
     rainbowHue=(rainbowHue+0.02)%1
     if espEnabled then
         processScanStep(); updateColors(); cleanupExpired(); cleanupBrainrotRoots()
-        if contEnabled and qempty() and time()-lastCont>=CONT_SCAN_PERIOD then lastCont=time(); qpush(workspace) end
+        if contEnabled and qempty() and tNow-lastCont>=CONT_SCAN_PERIOD then lastCont=tNow; qpush(workspace) end
         local myHRP=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
         if myHRP then
             local myPos=myHRP.Position
@@ -584,12 +681,22 @@ safeConnect(RunService.Heartbeat,function()
                 local L=pack.line
                 if isValid(inst) and isValid(L) and activeMarks[inst] then
                     local tpos=getWorldPos(inst)
-                    if tpos then local dir=tpos-myPos; local dist=dir.Magnitude; L.Size=Vector3.new(0.28,0.28,math.max(dist,0.5)); L.CFrame=CFrame.lookAt(myPos+dir*0.5,tpos); L.Color=pack.color end
-                else freeLine(L); specialBrainrotLines[inst]=nil end
+                    if tpos then
+                        local dir=tpos-myPos; local dist=dir.Magnitude
+                        L.Size=Vector3.new(0.28,0.28,math.max(dist,0.5))
+                        L.CFrame=CFrame.lookAt(myPos+dir*0.5,tpos)
+                        -- Pulso bi-color para líneas de especiales
+                        local s = pulseAlpha(tNow, SPECIAL_PULSE_SPEED)
+                        s = s*0.7
+                        L.Color = pack.baseLine:Lerp(RED_STRONG, s)
+                    end
+                else
+                    freeLine(L); specialBrainrotLines[inst]=nil
+                end
             end
         end
     end
     if playerESPEnabled then updatePlayerESPLines() end
     local cB,cP=0,0; for _ in pairs(activeMarks) do cB+=1 end; for _ in pairs(playerESPData) do cP+=1 end
-    status.Text=string.format("Brainrots activos: %d  |  Players ESP: %d  |  [T] togglear UI", cB, cP)
+    status.Text=string.format("Brainrots activos: %d  |  Players ESP: %d  |  [T] UI  |  Potato:%s", cB, cP, potatoOn and "ON" or "OFF")
 end)
