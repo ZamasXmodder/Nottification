@@ -68,7 +68,7 @@ local targetNames={
     "Los Combinasionas","Nuclearo Dinosauro","Las Sis","Los Hotspotsitos","Tralaledon",
     "Ketupat Kepat","Los Bros","La Supreme Combinasion","Ketchuru and Masturu",
     "Garama and Madundung","Dragon Cannelloni","Celularcini Viciosini","La Spooky Grande","Los Mobilis","Eviledon",
-    "Spooky and Pumpky"
+    "Spooky and Pumpky","Mieteteira Bicicleteira","Meowl"
 }
 local targetSet={} for _,n in ipairs(targetNames) do targetSet[n]=true end
 
@@ -87,6 +87,8 @@ local specialDarkMap={
     ["Garama and Madundung"] ={line=Color3.fromRGB(26,42,46), fill=Color3.fromRGB(20,34,38)},
     ["Dragon Cannelloni"]    ={line=Color3.fromRGB(46,26,26), fill=Color3.fromRGB(38,20,20)},
     ["Spooky and Pumpky"]    ={line=Color3.fromRGB(46,26,26), fill=Color3.fromRGB(38,20,20)},
+    ["Mieteteira Bicicleteira"] = { line = Color3.fromRGB(36,26,46), fill = Color3.fromRGB(28,20,38) }, -- tono morado oscuro
+    ["Meowl"]                   = { line = Color3.fromRGB(30,30,42), fill = Color3.fromRGB(24,24,34) }  -- gris/azul oscuro (cat vibes)
 }
 
 -- estado esp
